@@ -8,7 +8,7 @@
 
 export interface User {
   id: string;
-  slackHandle: string;
+  displayName: string;
   name: string;
   tags: string[];
   createdAt: string;

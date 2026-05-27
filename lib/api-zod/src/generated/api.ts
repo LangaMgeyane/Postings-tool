@@ -20,12 +20,12 @@ export const HealthCheckResponse = zod.object({
  * @summary Login via Slack handle
  */
 export const LoginBody = zod.object({
-  "slackHandle": zod.string()
+  "displayName": zod.string()
 })
 
 export const LoginResponse = zod.object({
   "id": zod.string(),
-  "slackHandle": zod.string(),
+  "displayName": zod.string(),
   "name": zod.string(),
   "tags": zod.array(zod.string()),
   "createdAt": zod.string()

@@ -384,23 +384,23 @@ components:
     LoginInput:
       type: object
       required:
-        - slackHandle
+        - displayName
       properties:
-        slackHandle:
+        displayName:
           type: string
 
     User:
       type: object
       required:
         - id
-        - slackHandle
+        - displayName
         - name
         - tags
         - createdAt
       properties:
         id:
           type: string
-        slackHandle:
+        displayName:
           type: string
         name:
           type: string

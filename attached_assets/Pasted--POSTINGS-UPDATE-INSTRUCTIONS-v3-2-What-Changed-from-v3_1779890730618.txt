@@ -1,0 +1,542 @@
+# POSTINGS — UPDATE INSTRUCTIONS v3.2
+
+## What Changed from v3.1 → What to Fix Now
+
+This is a surgical update guide. Do not rebuild from scratch.
+Apply only the changes listed here. Preserve everything that is working.
+
+-----
+
+## 0. ORIENTATION — HOW TO READ THIS DOCUMENT
+
+Each section is tagged with one of:
+
+- `[FIX]` — something broken that must be corrected
+- `[ADD]` — new behaviour that did not exist before
+- `[CHANGE]` — existing behaviour being modified or clarified
+- `[REMOVE]` — something to delete or stop doing
+
+Sections are ordered by priority — fix crashes first, then broken flows,
+then additions, then polish.
+
+-----
+
+## 1. CRITICAL CRASHES — FIX THESE FIRST
+
+### [FIX] Annotation TDZ crash — `currentAnnotations` before initialization
+
+**File:** `annotation.js`
+
+**Symptom:** Runtime crash on annotation open:
+`Cannot access 'currentAnnotations' before initialization`
+
+**Cause:** `resizeCanvas()` is called at module init time. It internally
+calls `redraw()`. `redraw()` references `currentAnnotations` — but
+`currentAnnotations` is declared with `const` *after* `resizeCanvas` in
+the file. This is a temporal dead zone violation.
+
+**Fix:** Move the declaration of `currentAnnotations` (and any other
+annotation state arrays: `currentTexts`, undo stack, etc.) to the **top
+of the module**, before any function that references them is called.
+
+```js
+// CORRECT — state declared first, before any function calls
+const currentAnnotations = [];
+const currentTexts = [];
+const undoStack = [];
+
+function resizeCanvas() { ... }   // references currentAnnotations safely
+function redraw() { ... }
+```
+
+-----
+
+### [FIX] HTTP 400 on post / comment / note / annotation creation
+
+**Files:** `api.js` (root fix), `post.js`, `anb.js`, `annotation.js`
+
+**Symptom:** Creating any content returns HTTP 400 with message:
+`"authorId and authorName are required"`
+
+**Cause:** Individual call sites were not including `authorId` and
+`authorName` in request bodies. Some sites also read comment/note text
+from a stale captured variable instead of the form field at submit time.
+
+**Fix — apply universally in `api.js`:**
+
+The fetch wrapper must automatically attach `authorId` and `authorName`
+from `sessionState` to every POST and PATCH request body. Individual
+call sites must not be responsible for this.
+
+```js
+// api.js — POST wrapper pattern
+function post(path, body = {}) {
+  return fetch(`/api/postings${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      authorId: sessionState.userId,
+      authorName: sessionState.userName,
+      ...body
+    })
+  });
+}
+// Apply same pattern to PATCH wrapper
+```
+
+**Fix — comment textarea:**
+At submit time, read `.value` directly from the textarea DOM element.
+Never use a variable that captured the value at an earlier point.
+
+```js
+// CORRECT
+const text = document.getElementById('comment-input').value.trim();
+if (!text) return;
+await api.postComment(postId, { text });
+
+// WRONG — stale variable
+await api.postComment(postId, { text: capturedText });
+```
+
+-----
+
+### [FIX] All three panels visible simultaneously
+
+**File:** `layout.css`, `navigate.js`
+
+**Symptom:** On entering the Writers Room, Feed, Content, and ANB panels
+all render at the same time instead of following the state-driven
+visibility rules.
+
+**Fix — panel visibility rules:**
+
+Use CSS classes (`panel--hidden`, `panel--collapsed`, `panel--active`)
+toggled by `navigate.js`. Never set `display: none` inline from JS.
+
+|State           |Feed                                             |Content       |ANB    |
+|----------------|-------------------------------------------------|--------------|-------|
+|No post selected|visible                                          |hidden        |visible|
+|Post selected   |collapsed to rail (desktop) / off-screen (mobile)|active        |visible|
+|Back to feed    |visible                                          |hidden        |visible|
+|C3 Pin Board    |hidden                                           |pinboard fills|visible|
+
+All panel show/hide must use CSS transitions (translate or width).
+Panels slide — they do not pop.
+
+-----
+
+### [FIX] Pinboard cards not selectable / sticky notes not draggable
+
+**File:** `pinboard.js`
+
+**Symptom:** Cards render but clicking or dragging them does nothing.
+
+**Cause:** No hit testing or drag lifecycle was implemented.
+
+**Fix — implement the full interaction loop without exception:**
+
+```
+User Event → Translate Coordinates → Hit Test → Mutate State → redraw()
+```
+
+Every interaction ends in `redraw()`. Nothing else updates the display.
+
+**Coordinate translation (run every event through this):**
+
+```js
+function toCanvasCoords(screenX, screenY) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (screenX - rect.left - transform.x) / transform.scale,
+    y: (screenY - rect.top - transform.y) / transform.scale
+  };
+}
+```
+
+**Hit testing (reverse render order = topmost first):**
+
+```js
+function hitTest(canvasX, canvasY) {
+  for (let i = cards.length - 1; i >= 0; i--) {
+    const c = cards[i];
+    if (canvasX >= c.x && canvasX <= c.x + c.width &&
+        canvasY >= c.y && canvasY <= c.y + c.height) return c;
+  }
+  return null;
+}
+```
+
+**Drag lifecycle — track across three events:**
+
+- `mousedown`: hit test → if card hit, set `dragTarget`, record offset
+  and `mouseDownPos`, set `movedFlag = false`; if empty canvas, begin pan
+- `mousemove`: if `dragTarget`, update card position, set `movedFlag = true` if moved > 3px, call `redraw()`; if panning, update transform
+- `mouseup`: if `movedFlag = false`, treat as click (select toggle in
+  edit mode); if `movedFlag = true`, drag complete; clear `dragTarget`
+
+The 3px threshold (`movedFlag`) is mandatory — without it every drag
+also fires a selection toggle.
+
+Mirror all mouse events with touch equivalents using `e.touches[0]`.
+Always call `e.preventDefault()` on touch events inside the canvas.
+
+-----
+
+## 2. BROKEN FLOWS — FIX THESE SECOND
+
+### [FIX] Annotation text tool not working
+
+**File:** `annotation.js`
+
+**Symptom:** Clicking Text tool, then clicking on the canvas, does
+nothing. No input appears, no text is placed.
+
+**Fix — implement click-to-place text:**
+
+1. When Text tool is active, listen for `click` on the annotation canvas
+1. On click, translate the click coordinates to canvas-space (percentage)
+1. Create a small floating `<input>` element positioned at the click
+   coordinates (absolute, positioned relative to the canvas container)
+1. Style it as a sticky-note: slight paper-colored background,
+   auto-expanding width, no fixed size, subtle fold-corner triangle
+1. On `Enter` or `blur`: commit — store `{ x, y, text }` in
+   `currentTexts[]`, render the text on the canvas, remove the input
+1. On `Escape`: cancel — remove the input, place nothing
+
+Text items in `currentTexts[]` are discrete undoable units (same as
+strokes for Draw).
+
+-----
+
+### [FIX] Annotation apply — preview field written incorrectly
+
+**File:** `annotation.js`, `anb.js`
+
+**Symptom:** ANB Notes tab shows blank or missing previews for text
+annotations.
+
+**Fix — two parts:**
+
+**Part 1 — at Apply time:** When saving a text annotation, write both:
+
+- `texts: currentTexts` — the full array of `{ x, y, text }` objects
+- `text: currentTexts.map(t => t.text).join(' ')` — a flat preview string
+
+Both fields must be present on the annotation object sent to the API.
+
+**Part 2 — in ANB rendering:** When building the preview string for
+display, read from both paths:
+
+```js
+const preview = ann.texts?.[0]?.text || ann.text || '(drawing)';
+```
+
+-----
+
+### [FIX] Pinboard sticky notes — cannot create new ones
+
+**File:** `pinboard.js`
+
+**Symptom:** The “+ Sticky” button either does nothing or uses
+`window.prompt()` which is blocked or returns null.
+
+**Fix:**
+
+- Remove any `prompt()` usage for sticky note creation
+- In edit mode only: show a floating form element (above the canvas,
+  not on it) containing a single text input and an Add button
+- On Add (or Enter): create a `stickyNote` card at the center of the
+  currently visible canvas area with ±20px random jitter
+- The form dismisses after creation
+
+The `stickyNote` type must be preserved on round-trip to/from the API.
+Sticky notes participate in: multi-select, drag, group, context mode,
+and filter system — same as post pins.
+
+-----
+
+### [FIX] Notes panel — inline input instead of `prompt()`
+
+**File:** `post.js` or wherever the note modal is triggered
+
+**Symptom:** `window.prompt()` is used to collect note text on text
+selection. This is blocked in some environments and unavailable on
+mobile.
+
+**Fix:**
+
+- Replace `prompt()` with a small inline floating panel that appears
+  near the selected text
+- The panel contains: a textarea input, a note type selector
+  (editorial / factual / style / general), and Confirm / Cancel buttons
+- On Confirm: POST to `/notes` with `{ authorId, authorName, text, noteType }` from sessionState + form
+- On Cancel or clicking outside: dismiss without saving
+- All touch targets minimum 44px
+
+-----
+
+### [FIX] Feed not sorted by recency
+
+**File:** `feed.js`
+
+**Symptom:** Posts appear in creation order, not edit order.
+
+**Fix:** Sort feed by `updatedAt` descending at render time.
+
+```js
+posts.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+```
+
+-----
+
+### [FIX] Submit confirm logic
+
+**File:** `post.js`
+
+**Symptom:** Submit for Review button either always submits without
+confirming, or never submits.
+
+**Fix:**
+
+```js
+// CORRECT
+const result = window.confirm('Submit this post for review?');
+if (!result) return;
+// proceed with submit
+
+// WRONG — evaluates function reference, always truthy
+if (!confirm) return;
+```
+
+-----
+
+## 3. NEW BEHAVIOUR — ADD THESE
+
+### [ADD] New Post modal — structured creation form
+
+**File:** `post.js`, `feed.js`
+
+v3.1 created a blank post directly. v3.2 requires a structured modal
+before the editor opens. The modal collects:
+
+- Title (required — validate before submitting)
+- Category
+- Tags (comma-separated)
+
+The purpose is to orient the writer before they open the document.
+After modal submission:
+
+1. POST to `/posts` with title, category, tags, authorId, authorName
+1. Prepend new card to feed via `Feed.prependPost()`
+1. Open the new post immediately in D2 (editor)
+
+The modal must not be a browser dialog. It is a styled dark-card modal
+with blur backdrop, consistent with the rest of the aesthetic system.
+
+-----
+
+### [ADD] Login screen visual hierarchy correction
+
+**File:** `auth.js`, relevant CSS
+
+v3.1 had the input form visually dominant with the logo above it.
+v3.2 inverts this:
+
+- Logo: large, centered, prominent — the first thing you see
+- Username input: narrow, clean, minimal — not a large block
+- Login button: compact, not full-width
+
+The composition should feel like a title card with a small sign-in
+mechanism beneath it. Not a form with a logo above it.
+
+The hover and highlight states on workspace/subspace selection screens
+are correct — do not change those.
+
+-----
+
+### [ADD] Comments — character count display
+
+**File:** `anb.js`
+
+Add a character count indicator to the comment textarea:
+
+- Shows `X / 500` updated live as the user types
+- Placed below or beside the textarea
+- Turns accent color (orange) when approaching/exceeding limit
+
+-----
+
+### [ADD] Session auth — `displayName` field on User model
+
+**File:** `server.js`, `session.js`
+
+v3.1 used `slackHandle` for login. v3.2 uses a display name.
+
+Update the User model:
+
+```js
+User { id, displayName, name, tags, createdAt }
+```
+
+Login resolves by `displayName`. The `/auth/login` endpoint accepts
+`{ displayName }` and returns the user object. Create user if new.
+
+Session stores `userId` and `userName` (mapped from `displayName`).
+All auth checks read from `sessionState`.
+
+-----
+
+### [ADD] Environment — remove external API dependency
+
+**File:** `server.js`, `.env`
+
+v3.1 required `SCHEME_API_URL` pointing to an external API server.
+v3.2 is fully self-contained.
+
+Remove `SCHEME_API_URL` from `.env` and all references in `server.js`.
+All data lives in the in-memory store on this server. No proxy routes.
+
+Only required env var:
+
+```
+PORT=3000
+```
+
+-----
+
+## 4. PINBOARD — ADDITIONAL SPEC CLARIFICATIONS
+
+These were vague in v3.1 and are now explicit:
+
+### [CHANGE] redraw() structure — order is mandatory
+
+```js
+function redraw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.translate(transform.x, transform.y);
+  ctx.scale(transform.scale, transform.scale);
+
+  drawConnections();    // bezier lines — drawn first, behind cards
+  drawGroupBrackets();  // rounded rect borders behind group members
+  drawCards();          // all cards
+  drawSelectionUI();    // rings, glows, context highlights — topmost
+
+  ctx.restore();
+}
+```
+
+Nothing is drawn outside of `redraw()`. Every state mutation ends with
+a `redraw()` call.
+
+### [CHANGE] Pinboard state — add missing fields
+
+```js
+// Add these to the state object if not present
+selectedIds[]  // IDs of currently selected cards (edit mode)
+focusedId      // ID of card in context/focus mode (browse mode)
+boardDirty     // boolean — true if unsaved changes exist
+```
+
+### [CHANGE] Edit mode exit — save only if dirty
+
+On edit mode exit: if `boardDirty === true`, save board state to
+`PUT /api/postings/pinboard/:workspace`, then clear selection and
+reset `boardDirty = false`.
+
+### [CHANGE] Group creation — action bar source
+
+The floating action bar for group creation slides up from the **canvas
+bottom**, not from a panel. It appears when 2+ cards are selected in
+edit mode. It contains:
+
+- “N cards selected” label
+- Group name input
+- Create Group button
+- Unlink Group button (only if all selected cards share a `groupId`)
+- Clear button
+
+-----
+
+## 5. RESPONSIVE SYSTEM — APPLY LAST
+
+Do not do this step until all crashes and broken flows above are fixed.
+
+### [ADD] Breakpoints
+
+```css
+/* Mobile-first. Add to layout.css */
+/* Mobile:  0px   — single panel, bottom-sheet ANB */
+/* Tablet:  768px — two-panel, ANB overlay */
+/* Desktop: 1024px — three-panel */
+```
+
+### [ADD] Mobile panel behaviour
+
+- Use `100dvh` everywhere — not `100vh`
+- On mobile, only one panel visible at a time
+- ANB becomes a bottom sheet (slides up from bottom), not a side panel
+- Bottom navigation bar with three tabs: Feed / Read / Tools
+  - Tapping a post in the Feed automatically switches to the Read panel
+  - The Read tab activates on post selection — no manual tab switch needed
+- All touch targets minimum 44px
+
+### [ADD] Annotation toolbar — mobile docking
+
+On mobile, the annotation toolbar docks to the bottom of the screen,
+full width, with 44px minimum touch targets.
+
+-----
+
+## 6. RULES THAT HAVE NOT CHANGED — DO NOT BREAK THESE
+
+- Never use `alert()` or `prompt()` anywhere
+  *(exception: `window.confirm()` for submit-for-review only)*
+- No frontend framework — vanilla JS only
+- CommonJS `require()` on server — no `import/export`
+- Retina-safe canvas: apply `devicePixelRatio` scaling on init and resize
+- Percentage-based annotation coordinate storage (0–1 normalized)
+- Inline SVG grain texture for surface texture
+- Subtle transitions only — nothing abrupt
+- No heavy shadows
+- App kind in Replit must be set to `web`, not `api`
+- The app must feel like a publication tool — not a generic CRUD app
+
+-----
+
+## 7. SEED DATA — KEEP AS-IS
+
+Server startup seeds: 6 posts + 3 users + demo comments + demo
+annotations. This must remain so the app is never empty on a fresh
+session.
+
+Do not wipe or alter seed data unless a specific data model change
+above requires it (e.g. `slackHandle` → `displayName` on User).
+
+-----
+
+## SUMMARY — CHANGE CHECKLIST
+
+|# |Area                                                      |Type  |Done?|
+|--|----------------------------------------------------------|------|-----|
+|1 |`currentAnnotations` TDZ crash                            |FIX   |☐    |
+|2 |`authorId`/`authorName` missing from all mutating requests|FIX   |☐    |
+|3 |Comment textarea reads stale variable                     |FIX   |☐    |
+|4 |All three panels visible simultaneously                   |FIX   |☐    |
+|5 |Pinboard hit testing + drag lifecycle                     |FIX   |☐    |
+|6 |Annotation text tool — click-to-place                     |FIX   |☐    |
+|7 |Annotation apply — `texts[]` + flat `text` preview        |FIX   |☐    |
+|8 |ANB Notes preview reads wrong field                       |FIX   |☐    |
+|9 |Pinboard sticky note creation — replace prompt()          |FIX   |☐    |
+|10|Notes panel — replace prompt() with inline popover        |FIX   |☐    |
+|11|Feed sorted by `updatedAt` descending                     |FIX   |☐    |
+|12|Submit confirm logic                                      |FIX   |☐    |
+|13|New Post modal (title, category, tags)                    |ADD   |☐    |
+|14|Login screen — logo dominant, form minimal                |ADD   |☐    |
+|15|Comments — character count display                        |ADD   |☐    |
+|16|User model — `displayName` replaces `slackHandle`         |ADD   |☐    |
+|17|Remove `SCHEME_API_URL` — fully self-contained server     |REMOVE|☐    |
+|18|Pinboard state — `selectedIds`, `focusedId`, `boardDirty` |CHANGE|☐    |
+|19|Pinboard edit mode exit — save only if dirty              |CHANGE|☐    |
+|20|Responsive layout + mobile panels + bottom nav            |ADD   |☐    |
+|21|Annotation toolbar — mobile bottom-docked                 |ADD   |☐    |

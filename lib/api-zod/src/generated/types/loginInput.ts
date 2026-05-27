@@ -7,5 +7,5 @@
  */
 
 export interface LoginInput {
-  slackHandle: string;
+  displayName: string;
 }

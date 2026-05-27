@@ -6,10 +6,14 @@ import { Button } from '@/components/ui/button';
 import { formatDistanceToNow } from 'date-fns';
 import { AnnotationOverlay } from './AnnotationOverlay';
 import { NoteModal } from './NoteModal';
-import { PenTool, MessageSquarePlus, Maximize2 } from 'lucide-react';
+import { PenTool, MessageSquarePlus, Maximize2, ArrowLeft } from 'lucide-react';
 import { useLocation } from 'wouter';
 
-export function PostViewer() {
+interface PostViewerProps {
+  onBack?: () => void;
+}
+
+export function PostViewer({ onBack }: PostViewerProps) {
   const session = getSession();
   const [, setLocation] = useLocation();
   const [isAnnotating, setIsAnnotating] = useState(false);
@@ -24,91 +28,113 @@ export function PostViewer() {
     }
   });
 
-  if (!postId) {
-    return (
-      <div className="h-full flex items-center justify-center text-muted-foreground flex-col gap-4">
-        <BookOpen className="w-12 h-12 opacity-20" />
-        <p>Select a post to view</p>
-      </div>
-    );
-  }
+  if (!postId) return null;
 
   if (isLoading) {
-    return <div className="p-8">Loading post...</div>;
+    return <div className="p-8 text-sm text-muted-foreground">Loading post...</div>;
   }
 
-  if (!post) return <div className="p-8 text-destructive">Post not found</div>;
+  if (!post) return <div className="p-8 text-destructive text-sm">Post not found</div>;
 
   const isAuthor = session?.userId === post.authorId;
 
   return (
     <div className="h-full flex flex-col relative">
-      <div className="h-14 border-b border-border/50 flex items-center justify-between px-6 shrink-0 bg-background/95 backdrop-blur z-10">
+      {/* Action bar */}
+      <div className="h-12 border-b border-border/40 flex items-center justify-between px-4 shrink-0 bg-surface/60 backdrop-blur">
         <div className="flex items-center gap-3">
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="text-muted-foreground hover:text-foreground transition-colors mr-1"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+          )}
           <StatusPill status={post.status} />
-          {post.category && <span className="text-xs uppercase tracking-wider font-bold text-muted-foreground">{post.category}</span>}
+          {post.category && (
+            <span className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground">
+              {post.category}
+            </span>
+          )}
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setIsAddingNote(true)} className="h-8">
-            <MessageSquarePlus className="w-4 h-4 mr-2" />
-            Add Note
+        <div className="flex gap-1.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setIsAddingNote(true)}
+          >
+            <MessageSquarePlus className="w-3.5 h-3.5 mr-1.5" />
+            Note
           </Button>
-          <Button variant="default" size="sm" onClick={() => setIsAnnotating(true)} disabled={isAuthor} className="h-8">
-            <PenTool className="w-4 h-4 mr-2" />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => setIsAnnotating(true)}
+            disabled={isAuthor}
+            title={isAuthor ? "Cannot annotate your own post" : "Annotate this post"}
+          >
+            <PenTool className="w-3.5 h-3.5 mr-1.5" />
             Annotate
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => setLocation('/writers-room?subspace=c3')} className="h-8">
-            <Maximize2 className="w-4 h-4 mr-2" />
-            View Board
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setLocation('/writers-room?subspace=c3')}
+          >
+            <Maximize2 className="w-3.5 h-3.5 mr-1.5" />
+            Board
           </Button>
         </div>
       </div>
-      
-      <div className="flex-1 overflow-y-auto p-8 lg:p-12">
-        <div className="max-w-3xl mx-auto space-y-8 pb-32">
-          <div>
-            <h1 className="text-4xl md:text-5xl font-bold font-sans tracking-tight mb-4">{post.title}</h1>
-            <div className="flex items-center gap-2 text-muted-foreground text-sm">
-              <span className="text-foreground font-medium">{post.authorName}</span>
-              <span>•</span>
-              <span>{formatDistanceToNow(new Date(post.createdAt))} ago</span>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto px-8 py-10 lg:px-16">
+        <div className="max-w-2xl mx-auto space-y-8 pb-24">
+          <div className="space-y-4">
+            <h1 className="text-3xl md:text-4xl font-bold tracking-tight leading-tight">
+              {post.title}
+            </h1>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span className="text-foreground/70 font-medium">{post.authorName}</span>
+              <span className="opacity-40">·</span>
+              <span>{formatDistanceToNow(new Date(post.updatedAt || post.createdAt))} ago</span>
             </div>
             {post.tags && post.tags.length > 0 && (
-              <div className="flex gap-2 mt-4">
+              <div className="flex gap-1.5 flex-wrap">
                 {post.tags.map(t => (
-                  <span key={t} className="px-2 py-1 bg-surface border border-border rounded-md text-xs text-muted-foreground">
+                  <span
+                    key={t}
+                    className="px-2 py-0.5 bg-surface border border-border/40 rounded text-[10px] font-mono text-muted-foreground uppercase tracking-wider"
+                  >
                     {t}
                   </span>
                 ))}
               </div>
             )}
           </div>
-          
-          <div 
-            className="prose prose-invert prose-orange max-w-none font-serif leading-relaxed text-lg"
-            dangerouslySetInnerHTML={{ __html: post.body || '<p class="text-muted-foreground italic">No content</p>' }}
+
+          <div
+            className="prose prose-invert max-w-none leading-relaxed text-base text-foreground/85 prose-p:mb-5 prose-headings:font-bold"
+            dangerouslySetInnerHTML={{
+              __html: post.body || '<p class="italic text-muted-foreground">No content yet.</p>'
+            }}
           />
         </div>
       </div>
 
       {isAnnotating && (
-        <AnnotationOverlay 
-          post={post} 
-          onClose={() => setIsAnnotating(false)} 
-        />
+        <AnnotationOverlay post={post} onClose={() => setIsAnnotating(false)} />
       )}
-      
-      <NoteModal 
+
+      <NoteModal
         postId={post.id}
         open={isAddingNote}
         onOpenChange={setIsAddingNote}
       />
     </div>
-  );
-}
-
-function BookOpen(props: any) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinelinejoin="round" {...props}><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
   );
 }

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useListPosts, getListPostsQueryKey } from '@workspace/api-client-react';
-import { getSession, setSession } from '@/session';
+import { getSession } from '@/session';
 import { StatusPill } from './StatusPill';
 import { SkeletonCard } from './SkeletonCard';
 import { Input } from '@/components/ui/input';
@@ -11,14 +11,25 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useQueryClient } from '@tanstack/react-query';
 
-export function Feed() {
+interface FeedProps {
+  onPostSelect?: (postId: string) => void;
+}
+
+const FILTER_OPTS = [
+  { label: 'All', value: '' },
+  { label: 'Draft', value: 'draft' },
+  { label: 'In Review', value: 'in-review' },
+  { label: 'Published', value: 'published' },
+];
+
+export function Feed({ onPostSelect }: FeedProps) {
   const session = getSession();
   const queryClient = useQueryClient();
   const isMyJournal = session?.currentSubspace === 'c2';
-  
+
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [filter, setFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState('');
   const [isNewPostOpen, setIsNewPostOpen] = useState(false);
 
   useEffect(() => {
@@ -28,101 +39,127 @@ export function Feed() {
 
   const params = {
     ...(isMyJournal && session?.userId ? { authorId: session.userId } : {}),
-    ...(filter !== 'All' ? { status: filter.toLowerCase() } : {})
+    ...(statusFilter ? { status: statusFilter } : {}),
   };
 
-  const { data: posts, isLoading } = useListPosts(params, {
-    query: {
-      queryKey: getListPostsQueryKey(params)
-    }
+  const { data: rawPosts, isLoading } = useListPosts(params, {
+    query: { queryKey: getListPostsQueryKey(params) }
   });
 
-  const filteredPosts = posts?.filter(p => 
-    p.title.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
-    p.authorName.toLowerCase().includes(debouncedSearch.toLowerCase())
-  ) || [];
+  // Sort by updatedAt descending client-side (backend also does this, belt-and-suspenders)
+  const posts = [...(rawPosts || [])].sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  );
+
+  const filteredPosts = posts.filter(p => {
+    if (!debouncedSearch) return true;
+    const q = debouncedSearch.toLowerCase();
+    return (
+      p.title.toLowerCase().includes(q) ||
+      p.authorName.toLowerCase().includes(q) ||
+      p.excerpt.toLowerCase().includes(q) ||
+      p.category.toLowerCase().includes(q) ||
+      p.tags.some(t => t.toLowerCase().includes(q))
+    );
+  });
 
   const handleSelect = (postId: string) => {
-    setSession({ selectedPostId: postId });
+    onPostSelect?.(postId);
   };
 
   return (
-    <div className="flex flex-col h-full bg-sidebar border-r border-border/50">
-      <div className="p-4 border-b border-border/50 space-y-4">
+    <div className="flex flex-col h-full bg-sidebar">
+      <div className="px-3 pt-3 pb-2 border-b border-border/40 space-y-2 shrink-0">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-sidebar-foreground">
+          <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
             {isMyJournal ? 'My Journal' : 'Main Journal'}
           </h2>
           {isMyJournal && (
-            <Button size="icon" variant="ghost" onClick={() => setIsNewPostOpen(true)} className="h-8 w-8 text-primary">
+            <button
+              onClick={() => setIsNewPostOpen(true)}
+              className="p-1 text-muted-foreground hover:text-primary transition-colors"
+              title="New draft"
+            >
               <Plus className="w-4 h-4" />
-            </Button>
+            </button>
           )}
         </div>
+
         <div className="relative">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input 
-            placeholder="Search posts..." 
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground/50" />
+          <Input
+            placeholder="Search..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="pl-9 bg-background/50 border-border/50 text-sm h-9"
+            className="pl-7 h-7 text-xs bg-background/40 border-border/30 placeholder:text-muted-foreground/30"
           />
         </div>
-        <div className="flex gap-2 text-xs">
-          {['All', 'Draft', 'In-Review', 'Published'].map(f => (
+
+        <div className="flex gap-1 flex-wrap">
+          {FILTER_OPTS.map(f => (
             <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={cn("px-2 py-1 rounded-full border transition-colors", 
-                filter === f ? "bg-primary/20 border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+              key={f.value}
+              onClick={() => setStatusFilter(f.value)}
+              className={cn(
+                "px-2 py-0.5 text-[9px] uppercase tracking-wider rounded-full border transition-all",
+                statusFilter === f.value
+                  ? "bg-primary/15 border-primary/50 text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
               )}
             >
-              {f}
+              {f.label}
             </button>
           ))}
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-2 space-y-2">
+
+      <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {isLoading ? (
-          Array.from({length: 8}).map((_, i) => <SkeletonCard key={i} />)
+          Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)
         ) : filteredPosts.length === 0 ? (
-          <div className="text-center p-4 text-sm text-muted-foreground">No posts found</div>
+          <div className="text-center py-8 text-xs text-muted-foreground">No posts found</div>
         ) : (
           filteredPosts.map(post => {
             const isSelected = session?.selectedPostId === post.id;
             return (
-              <div 
+              <div
                 key={post.id}
                 onClick={() => handleSelect(post.id)}
                 className={cn(
-                  "p-3 rounded-lg cursor-pointer transition-colors border",
-                  isSelected 
-                    ? "bg-raised border-primary/50 shadow-[inset_2px_0_0_0_hsl(var(--primary))]" 
-                    : "bg-surface border-border hover:border-border/80 hover:bg-raised/50"
+                  "p-3 rounded cursor-pointer transition-all border",
+                  isSelected
+                    ? "bg-raised border-border/60 shadow-[inset_2px_0_0_0_hsl(var(--primary))]"
+                    : "bg-transparent border-transparent hover:bg-surface/60 hover:border-border/30"
                 )}
               >
-                <div className="flex justify-between items-start mb-2">
-                  <h3 className="font-bold text-sm leading-tight line-clamp-2">{post.title || 'Untitled'}</h3>
-                  <StatusPill status={post.status} className="scale-75 origin-top-right" />
+                <div className="flex justify-between items-start gap-1 mb-1.5">
+                  <h3 className="font-semibold text-xs leading-tight line-clamp-2 flex-1">
+                    {post.title || 'Untitled'}
+                  </h3>
+                  <StatusPill status={post.status} className="scale-75 origin-top-right shrink-0" />
                 </div>
-                <p className="text-xs text-muted-foreground mb-2 line-clamp-2">{post.excerpt || 'No excerpt'}</p>
-                <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                <p className="text-[10px] text-muted-foreground mb-1.5 line-clamp-2 leading-snug">
+                  {post.excerpt || 'No excerpt'}
+                </p>
+                <div className="flex items-center justify-between text-[9px] text-muted-foreground">
                   <div className="flex items-center gap-1">
-                    <span className="font-medium text-foreground/80">{post.authorName}</span>
-                    <span>•</span>
-                    <span>{formatDistanceToNow(new Date(post.createdAt))} ago</span>
+                    <span className="font-medium text-foreground/60">{post.authorName}</span>
+                    <span>·</span>
+                    <span>{formatDistanceToNow(new Date(post.updatedAt))} ago</span>
                   </div>
                   {(post.annotationCount > 0 || post.noteCount > 0) && (
-                    <div className="flex items-center gap-1 text-primary/80">
-                      <Paperclip className="w-3 h-3" />
+                    <div className="flex items-center gap-0.5 text-primary/60">
+                      <Paperclip className="w-2.5 h-2.5" />
                       <span>{post.annotationCount + post.noteCount}</span>
                     </div>
                   )}
                 </div>
                 {post.tags && post.tags.length > 0 && (
-                  <div className="flex gap-1 mt-2 flex-wrap">
-                    {post.tags.map(t => (
-                      <span key={t} className="text-[9px] px-1.5 py-0.5 bg-background rounded-sm border border-border/50 text-muted-foreground">{t}</span>
+                  <div className="flex gap-1 mt-1.5 flex-wrap">
+                    {post.tags.slice(0, 3).map(t => (
+                      <span key={t} className="text-[8px] px-1.5 py-0.5 bg-background/60 rounded border border-border/30 text-muted-foreground font-mono">
+                        {t}
+                      </span>
                     ))}
                   </div>
                 )}
@@ -131,7 +168,15 @@ export function Feed() {
           })
         )}
       </div>
-      <NewPostModal open={isNewPostOpen} onOpenChange={setIsNewPostOpen} onSuccess={() => queryClient.invalidateQueries({ queryKey: getListPostsQueryKey(params) })} />
+
+      <NewPostModal
+        open={isNewPostOpen}
+        onOpenChange={setIsNewPostOpen}
+        onSuccess={(postId) => {
+          handleSelect(postId);
+          queryClient.invalidateQueries({ queryKey: getListPostsQueryKey(params) });
+        }}
+      />
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 
 export interface User {
   id: string;
-  slackHandle: string;
+  displayName: string;
   name: string;
   tags: string[];
   createdAt: string;
@@ -86,21 +86,21 @@ export interface PinboardData {
 const users: User[] = [
   {
     id: "U001",
-    slackHandle: "alex",
+    displayName: "alex",
     name: "Alex Mercer",
     tags: ["editor", "culture"],
     createdAt: new Date(Date.now() - 30 * 86400000).toISOString(),
   },
   {
     id: "U002",
-    slackHandle: "jamie",
+    displayName: "jamie",
     name: "Jamie Osei",
     tags: ["writer", "politics"],
     createdAt: new Date(Date.now() - 25 * 86400000).toISOString(),
   },
   {
     id: "U003",
-    slackHandle: "sasha",
+    displayName: "sasha",
     name: "Sasha Lindqvist",
     tags: ["writer", "art"],
     createdAt: new Date(Date.now() - 20 * 86400000).toISOString(),
@@ -337,7 +337,7 @@ const pinboards: Map<string, PinboardData> = new Map([
           status: null,
           category: null,
           tags: [],
-          noteText: "Theme cluster: authenticity + refusal + monoculture → possible issue?",
+          noteText: "Theme cluster: authenticity + refusal + monoculture — possible issue?",
           x: 270,
           y: 480,
           groupId: null,
@@ -363,17 +363,16 @@ export const store = {
   comments,
   pinboards,
 
-  findUser(slackHandle: string): User | undefined {
-    return users.find(
-      (u) => u.slackHandle.toLowerCase() === slackHandle.toLowerCase().replace(/^@/, ""),
-    );
+  findUser(displayName: string): User | undefined {
+    const handle = displayName.replace(/^@/, "").toLowerCase();
+    return users.find((u) => u.displayName.toLowerCase() === handle);
   },
 
-  createUser(slackHandle: string): User {
-    const handle = slackHandle.replace(/^@/, "");
+  createUser(displayName: string): User {
+    const handle = displayName.replace(/^@/, "");
     const user: User = {
       id: generateId("U"),
-      slackHandle: handle,
+      displayName: handle,
       name: handle.charAt(0).toUpperCase() + handle.slice(1),
       tags: [],
       createdAt: new Date().toISOString(),
@@ -390,7 +389,7 @@ export const store = {
     let result = [...posts];
     if (authorId) result = result.filter((p) => p.authorId === authorId);
     if (status) result = result.filter((p) => p.status === status);
-    return result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return result.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   },
 
   createPost(data: Partial<Post>, authorId: string, authorName: string): Post {
@@ -436,7 +435,12 @@ export const store = {
     return annotations.filter((a) => a.postId === postId && a.type === "note");
   },
 
-  createAnnotation(postId: string, data: Partial<Annotation>, authorId: string, authorName: string): Annotation {
+  createAnnotation(
+    postId: string,
+    data: Partial<Annotation>,
+    authorId: string,
+    authorName: string,
+  ): Annotation {
     const ann: Annotation = {
       id: generateId("A"),
       postId,

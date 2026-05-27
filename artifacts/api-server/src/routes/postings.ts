@@ -5,14 +5,14 @@ const router = Router();
 
 // Auth
 router.post("/auth/login", (req, res) => {
-  const { slackHandle } = req.body as { slackHandle?: string };
-  if (!slackHandle) {
-    res.status(400).json({ error: "slackHandle is required" });
+  const { displayName } = req.body as { displayName?: string };
+  if (!displayName) {
+    res.status(400).json({ error: "displayName is required" });
     return;
   }
-  let user = store.findUser(slackHandle);
+  let user = store.findUser(displayName);
   if (!user) {
-    user = store.createUser(slackHandle);
+    user = store.createUser(displayName);
   }
   res.json(user);
 });

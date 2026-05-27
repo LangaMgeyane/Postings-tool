@@ -10,12 +10,12 @@ export interface HealthStatus {
 }
 
 export interface LoginInput {
-  slackHandle: string;
+  displayName: string;
 }
 
 export interface User {
   id: string;
-  slackHandle: string;
+  displayName: string;
   name: string;
   tags: string[];
   createdAt: string;
