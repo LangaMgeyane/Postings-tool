@@ -1,22 +1,33 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Scheme Postings API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication
+  - name: posts
+    description: Posts
+  - name: annotations
+    description: Annotations
+  - name: notes
+    description: Notes
+  - name: comments
+    description: Comments
+  - name: pinboard
+    description: Pinboard
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +35,342 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /postings/auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login via Slack handle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /postings/posts:
+    get:
+      operationId: listPosts
+      tags: [posts]
+      summary: List posts
+      parameters:
+        - in: query
+          name: authorId
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of posts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Post"
+    post:
+      operationId: createPost
+      tags: [posts]
+      summary: Create a draft post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+
+  /postings/posts/{postId}:
+    get:
+      operationId: getPost
+      tags: [posts]
+      summary: Get a single post
+      parameters:
+        - in: path
+          name: postId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Post
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+    patch:
+      operationId: updatePost
+      tags: [posts]
+      summary: Update a post
+      parameters:
+        - in: path
+          name: postId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+
+  /postings/posts/{postId}/submit:
+    post:
+      operationId: submitPost
+      tags: [posts]
+      summary: Submit post for review
+      parameters:
+        - in: path
+          name: postId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+
+  /postings/posts/{postId}/annotations:
+    get:
+      operationId: listAnnotations
+      tags: [annotations]
+      summary: List annotations for a post
+      parameters:
+        - in: path
+          name: postId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Annotations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Annotation"
+    post:
+      operationId: createAnnotation
+      tags: [annotations]
+      summary: Create an annotation
+      parameters:
+        - in: path
+          name: postId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnnotationInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Annotation"
+
+  /postings/posts/{postId}/annotations/{annId}:
+    delete:
+      operationId: deleteAnnotation
+      tags: [annotations]
+      summary: Delete an annotation
+      parameters:
+        - in: path
+          name: postId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: annId
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  /postings/posts/{postId}/notes:
+    get:
+      operationId: listNotes
+      tags: [notes]
+      summary: List notes for a post
+      parameters:
+        - in: path
+          name: postId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Notes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Annotation"
+    post:
+      operationId: createNote
+      tags: [notes]
+      summary: Create a note
+      parameters:
+        - in: path
+          name: postId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NoteInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Annotation"
+
+  /postings/posts/{postId}/comments:
+    get:
+      operationId: listComments
+      tags: [comments]
+      summary: List comments for a post
+      parameters:
+        - in: path
+          name: postId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Comments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Comment"
+    post:
+      operationId: createComment
+      tags: [comments]
+      summary: Post a comment
+      parameters:
+        - in: path
+          name: postId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommentInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+
+  /postings/posts/{postId}/comments/{commentId}:
+    delete:
+      operationId: deleteComment
+      tags: [comments]
+      summary: Delete a comment
+      parameters:
+        - in: path
+          name: postId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: commentId
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  /postings/pinboard/{workspace}:
+    get:
+      operationId: getPinboard
+      tags: [pinboard]
+      summary: Get pinboard state
+      parameters:
+        - in: path
+          name: workspace
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Pinboard data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PinboardData"
+    put:
+      operationId: savePinboard
+      tags: [pinboard]
+      summary: Save pinboard state
+      parameters:
+        - in: path
+          name: workspace
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PinboardInput"
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PinboardData"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +381,310 @@ components:
       required:
         - status
 
+    LoginInput:
+      type: object
+      required:
+        - slackHandle
+      properties:
+        slackHandle:
+          type: string
+
+    User:
+      type: object
+      required:
+        - id
+        - slackHandle
+        - name
+        - tags
+        - createdAt
+      properties:
+        id:
+          type: string
+        slackHandle:
+          type: string
+        name:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+
+    Post:
+      type: object
+      required:
+        - id
+        - title
+        - body
+        - excerpt
+        - authorId
+        - authorName
+        - status
+        - category
+        - tags
+        - createdAt
+        - updatedAt
+        - annotationCount
+        - noteCount
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        body:
+          type: string
+        excerpt:
+          type: string
+        authorId:
+          type: string
+        authorName:
+          type: string
+        status:
+          type: string
+          enum: [draft, in-review, published]
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+        annotationCount:
+          type: integer
+        noteCount:
+          type: integer
+
+    PostInput:
+      type: object
+      properties:
+        title:
+          type: string
+        body:
+          type: string
+        excerpt:
+          type: string
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+
+    PostUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+        body:
+          type: string
+        excerpt:
+          type: string
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+
+    Stroke:
+      type: object
+      properties:
+        points:
+          type: array
+          items:
+            type: object
+            properties:
+              x:
+                type: number
+              y:
+                type: number
+
+    TextAnnotation:
+      type: object
+      properties:
+        x:
+          type: number
+        y:
+          type: number
+        text:
+          type: string
+
+    Annotation:
+      type: object
+      required:
+        - id
+        - postId
+        - type
+        - authorId
+        - authorName
+        - createdAt
+      properties:
+        id:
+          type: string
+        postId:
+          type: string
+        type:
+          type: string
+          enum: [drawing, text, note]
+        text:
+          type: ["string", "null"]
+        noteType:
+          type: ["string", "null"]
+        strokes:
+          type: array
+          items:
+            $ref: "#/components/schemas/Stroke"
+        texts:
+          type: array
+          items:
+            $ref: "#/components/schemas/TextAnnotation"
+        authorId:
+          type: string
+        authorName:
+          type: string
+        createdAt:
+          type: string
+
+    AnnotationInput:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum: [drawing, text, note]
+        text:
+          type: string
+        noteType:
+          type: string
+        strokes:
+          type: array
+          items:
+            $ref: "#/components/schemas/Stroke"
+        texts:
+          type: array
+          items:
+            $ref: "#/components/schemas/TextAnnotation"
+
+    NoteInput:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+        noteType:
+          type: string
+
+    Comment:
+      type: object
+      required:
+        - id
+        - postId
+        - text
+        - authorId
+        - authorName
+        - createdAt
+      properties:
+        id:
+          type: string
+        postId:
+          type: string
+        text:
+          type: string
+        authorId:
+          type: string
+        authorName:
+          type: string
+        createdAt:
+          type: string
+
+    CommentInput:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+
+    PinCard:
+      type: object
+      required:
+        - id
+        - type
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [post, stickyNote]
+        postId:
+          type: ["string", "null"]
+        title:
+          type: string
+        authorName:
+          type: ["string", "null"]
+        status:
+          type: ["string", "null"]
+        category:
+          type: ["string", "null"]
+        tags:
+          type: array
+          items:
+            type: string
+        noteText:
+          type: ["string", "null"]
+        x:
+          type: number
+        y:
+          type: number
+        groupId:
+          type: ["string", "null"]
+
+    PinConnection:
+      type: object
+      required:
+        - from
+        - to
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+
+    PinboardData:
+      type: object
+      required:
+        - workspace
+        - cards
+        - connections
+        - updatedAt
+      properties:
+        workspace:
+          type: string
+        cards:
+          type: array
+          items:
+            $ref: "#/components/schemas/PinCard"
+        connections:
+          type: array
+          items:
+            $ref: "#/components/schemas/PinConnection"
+        updatedAt:
+          type: string
+
+    PinboardInput:
+      type: object
+      properties:
+        cards:
+          type: array
+          items:
+            $ref: "#/components/schemas/PinCard"
+        connections:
+          type: array
+          items:
+            $ref: "#/components/schemas/PinConnection"

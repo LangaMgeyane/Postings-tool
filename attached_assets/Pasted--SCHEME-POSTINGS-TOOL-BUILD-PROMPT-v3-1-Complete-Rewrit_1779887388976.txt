@@ -1,0 +1,526 @@
+# SCHEME — POSTINGS TOOL BUILD PROMPT v3.1
+## Complete Rewrite — Writers Room — Desktop + Mobile Responsive
+
+---
+
+## ⚠️ REPLIT SETUP — READ FIRST
+
+This is a **Node.js web application**, not an API server.
+
+When creating this project in Replit:
+- Select template: **Node.js**
+- The run command is: `node server.js`
+- Set the artifact/app kind to **`web`** — NOT `api`
+- The app must serve an HTML frontend and be viewable in the Replit preview pane
+- Do NOT use Replit's built-in "Deploy as API" flow
+
+If you see a blank preview pane or a JSON response instead of a UI, the app kind is wrong. Fix by ensuring `server.js` serves `public/index.html` as the root route and that Replit is configured for web preview.
+
+---
+
+## OVERVIEW
+
+Build **Postings** — a full-screen collaborative writing, annotation, and pinboard app for Scheme, a creative culture publication. This is a complete application, not a webpage. It must feel native, immersive, and intentional on both desktop and mobile.
+
+This prompt supersedes all previous versions entirely. Build from scratch.
+
+First workspace active: **Writers Room.**
+Other workspaces (Editors Table, Review Gallery) are locked placeholder states.
+
+---
+
+## TECH STACK
+
+- Frontend: Vanilla HTML, CSS, JavaScript — no framework, no build step on the frontend
+- Backend: Node.js + Express (CommonJS, not ESM) — serves frontend, proxies to Scheme API
+- Canvas: HTML5 Canvas API — annotation drawing and pinboard
+- Hosting: Replit
+
+> Use `require()` throughout server.js. Do not use `import/export` on the server unless you configure a proper ESM or TypeScript/esbuild pipeline. Mixing module systems is a common source of build failure.
+
+---
+
+## ENVIRONMENT VARIABLES
+
+```
+SCHEME_API_URL=https://your-scheme-api.replit.app
+PORT=3000
+```
+
+Load with `dotenv`. Do not hardcode secrets.
+
+---
+
+## FILE STRUCTURE
+
+```
+/scheme-postings
+  /public
+    index.html          ← Single-page shell — all views live here
+    /css
+      base.css          ← Design tokens, reset, typography
+      layout.css        ← App shell, panels, view switching
+      components.css    ← Feed cards, ANB items, toolbars, modals
+      annotation.css    ← Annotation overlay (E1)
+      pinboard.css      ← Infinite pin board canvas + controls
+      animations.css    ← Transitions, skeletons, toasts
+    /js
+      utils.js          ← DOM helpers, debounce, escapeHtml, relativeTime
+      api.js            ← Fetch wrapper + all API methods
+      session.js        ← Runtime state, URL-encoded session codes
+      auth.js           ← Login form + identity resolution
+      navigate.js       ← View transitions + subspace switching
+      feed.js           ← Post list, search, filters, skeleton loading
+      post.js           ← Post viewer/editor, note modal, rich text
+      annotation.js     ← Canvas annotation overlay (E1)
+      anb.js            ← ANB panel: Notes / Comments / Board tabs
+      pinboard.js       ← Infinite canvas: draw, filter, group, context
+      app.js            ← Bootstrap, global keyboard shortcuts, routing
+    /assets
+      logo-orange.png
+      schememark.png
+  server.js
+  .env
+  package.json
+  README.md
+```
+
+---
+
+## PACKAGE.JSON
+
+```json
+{
+  "dependencies": {
+    "express": "^4.18.2",
+    "dotenv": "^16.3.1"
+  },
+  "scripts": {
+    "start": "node server.js"
+  }
+}
+```
+
+No frontend dependencies. No build step.
+
+---
+
+## AESTHETIC SYSTEM
+
+### TWO VISUAL MODES
+
+**MODE 1 — EDITORIAL MODE (default)**
+
+Dark. Print-inspired. Magazine production room energy. Feels like the working desk of a publication art director — serious, considered, and alive with intent.
+
+CSS custom properties (define in `base.css`):
+
+```css
+--bg-base:        #0d0d0d     /* Page background */
+--bg-surface:     #161616     /* Panel, card backgrounds */
+--bg-raised:      #1e1e1e     /* Hover states */
+--accent:         #E55A1B     /* Scheme orange */
+--text-primary:   #e8e6e0     /* Near-white */
+--text-secondary: #888        /* Subdued labels */
+--border:         rgba(255,255,255,0.06)
+--font-sans:      'DM Sans'
+--font-mono:      'DM Mono'
+```
+
+Component tokens:
+- Status pills: `published` = green, `in-review` = amber, `draft` = slate
+- Feed card active state: left 2px orange rule
+- Toasts: slide-up from bottom, 3s auto-dismiss
+- Modals: dark card, blur backdrop
+- Skeleton cards: animated shimmer
+
+Use inline SVG grain texture for surface texture. No heavy shadows.
+
+**MODE 2 — ANNOTATION MODE**
+
+Frosted glass over content. White marker on glass surface. Deliberate cognitive break.
+
+Transitions between modes must feel intentional. Use subtle transitions only.
+
+---
+
+## SESSION STATE SYSTEM
+
+Implement a runtime session object, persisted to `sessionStorage`:
+
+```js
+const sessionState = {
+  userId: string,
+  userName: string,
+  userTags: string[],
+  currentWorkspace: string,
+  currentSubspace: string,
+  selectedPostId: string,
+  isAuthorOfSelected: boolean,
+  sessionCode: string
+}
+```
+
+Session code format:
+```
+[userId]-[workspace]-[subspace]-[selectedPostId]
+```
+
+Example: `U041-WR1-D1-P0023`
+
+Requirements:
+- Encode session code into URL parameter `?s=`
+- Survive page refreshes
+- Validate and route on load
+- Invalid or missing sessions route to login
+- All permission checks read from `sessionState`
+
+Permission flags:
+- `isAuthor` — user is the post's author → show editor (D2)
+- `canAnnotate` — not own post → annotation button enabled
+- `isEditor` — reserved for future publish flow
+
+---
+
+## PAGE ARCHITECTURE — VIEW HIERARCHY
+
+The app is a **single HTML page** (`index.html`). Views are toggled via a `data-view` attribute on `<body>`. CSS handles show/hide. Navigation managed entirely in `navigate.js`. No page reloads.
+
+| View ID | Label | Trigger |
+|---|---|---|
+| `view-login` | A — Login | Initial load |
+| `view-workspace` | B — Workspace Selection | After login |
+| `view-subspace` | C — Subspace Selection | After workspace |
+| `view-writers-room` | D — Writers Room | After subspace |
+| `annotation-overlay` | E1 — Annotation Canvas | btn-annotate click |
+
+### Writers Room sub-contexts
+
+The Writers Room view renders differently based on `currentSubspace`:
+
+| Code | Name | Feed | Content Panel | ANB |
+|---|---|---|---|---|
+| C1 | Main Journal | All posts | Post Viewer (D1) | Notes / Comments / Board |
+| C2 | My Journal | Author's drafts | Post Editor (D2) | Notes / Comments / Board |
+| C3 | Pin Board | Hidden | Pinboard Canvas | Notes / Comments / Board |
+
+---
+
+## THREE-PANEL LAYOUT (Writers Room)
+
+```
+[ Feed Panel ] [ Content Panel ] [ ANB Panel ]
+```
+
+- Left Panel (Feed): 280px fixed
+- Right Panel (ANB): 280px fixed
+- Center Panel: flex-fill
+
+Feed and Post are two states of the same center panel. Panels slide — no reloads.
+
+**Mobile:**
+- Full-width sliding panels
+- Bottom-sheet ANB
+- All touch targets minimum 44px
+
+---
+
+## API ROUTES
+
+All routes prefixed at `/api/postings`.
+
+### Auth
+| Method | Path | Description |
+|---|---|---|
+| POST | `/auth/login` | Resolve Slack handle → user ID; creates user in store if new |
+
+### Posts
+| Method | Path | Description |
+|---|---|---|
+| GET | `/posts` | List posts; query params: `authorId`, `status` |
+| GET | `/posts/:id` | Single post |
+| POST | `/posts` | Create draft (`status: draft`) |
+| PATCH | `/posts/:id` | Update: title, body, excerpt, category, tags |
+| POST | `/posts/:id/submit` | Transition to `in-review` |
+
+### Annotations
+| Method | Path | Description |
+|---|---|---|
+| GET | `/posts/:id/annotations` | All annotations for post |
+| POST | `/posts/:id/annotations` | Save drawing or text annotation |
+| DELETE | `/posts/:id/annotations/:annId` | Remove annotation |
+
+### Notes
+| Method | Path | Description |
+|---|---|---|
+| GET | `/posts/:id/notes` | Notes (type: `note`) |
+| POST | `/posts/:id/notes` | Create editorial/factual/style/general note |
+
+### Comments
+| Method | Path | Description |
+|---|---|---|
+| GET | `/posts/:id/comments` | All comments |
+| POST | `/posts/:id/comments` | Post comment |
+| DELETE | `/posts/:id/comments/:commentId` | Delete comment (author-only in UI) |
+
+### Pinboard
+| Method | Path | Description |
+|---|---|---|
+| GET | `/pinboard/:workspace` | Load board state (cards, connections) |
+| PUT | `/pinboard/:workspace` | Persist board state |
+
+### Health
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/healthz` | Returns `{ status: "ok" }` |
+
+---
+
+## DATA MODEL (In-Memory Store)
+
+```js
+User        { id, slackHandle, name, tags, createdAt }
+Post        { id, title, body, excerpt, authorId, authorName,
+              status, category, tags, createdAt, updatedAt,
+              annotationCount, noteCount }
+Annotation  { id, postId, type, text, noteType, strokes, texts,
+              authorId, authorName, createdAt }
+Comment     { id, postId, text, authorId, authorName, createdAt }
+PinboardData { workspace, cards, connections, updatedAt }
+```
+
+**Status values:** `draft` → `in-review` → `published`
+
+**Annotation types:**
+- `drawing` — strokes[]
+- `text` — texts[] + joined text preview string
+- `note` — text + noteType
+
+**Pin card types:** post pin, `stickyNote`
+
+**Server seed on startup:** Pre-load 6 posts + 3 users + demo comments and annotations so the app never appears empty on a fresh session.
+
+---
+
+## FEATURE SPECIFICATIONS
+
+### Feed (C1 / C2)
+
+- Post cards: title, status pill, author, relative timestamp, excerpt, tag chips, annotation tack count
+- **Search:** debounced 200ms, filters across title, excerpt, author, category, tags
+- **Status filters:** All / Draft / In Review / Published
+- **Skeleton loading:** 8-card shimmer shown while fetching
+- **Seed fallback:** Client-side `SEED_POSTS` (10 posts) shown if API returns empty or fails
+- New posts prepended to feed immediately via `Feed.prependPost()`
+
+### Post Viewer (D1)
+
+Shown for non-author posts or submitted posts. Renders:
+- Status pill, category, title, byline, tags
+- Full body HTML (sanitized)
+- "Annotate" button → opens E1 overlay
+- "Note" button → opens note modal
+- "View Pins" button → navigates to C3
+- Comments thread (collapsible)
+
+### Post Editor (D2)
+
+Shown for author viewing their own draft post.
+
+- Title input, category field, tags (comma-separated)
+- `contenteditable` body
+- **Rich Text Toolbar:** Bold · Italic · Blockquote · Bullet List · Clear Formatting
+  - Uses `document.execCommand` for formatting
+  - Toolbar buttons highlight on `queryCommandState` as cursor moves
+- **Save Draft** → PATCH `/posts/:id`, falls back to `localStorage` if offline
+- **Submit for Review** → `window.confirm()` → save → POST `/posts/:id/submit` → transition to view mode → reload feed
+- "View Pins" button → C3
+- "Back" button → C2
+
+### Annotation Canvas (E1)
+
+Full-screen overlay over the post content.
+
+- **Draw tool (D):** Freehand marker. Strokes normalized to 0–1 coordinates (percentage-based) so they scale across screen sizes. Shadow glow on strokes.
+- **Text tool (T):** Click-to-place floating input. Text rendered at click coordinates. Enter/blur to commit, Escape to cancel.
+- **Undo (Ctrl+Z):** Pops last stroke or last text annotation.
+- **Clear:** Wipes all strokes and text.
+- **Apply:** Saves to API as annotation object (`type: drawing | text`, `strokes`, `texts[]`, `text` preview string — the joined preview must be written at apply time). Reloads ANB.
+- **Discard:** Closes overlay without saving.
+- Keyboard shortcuts: `D` = draw, `T` = text, `Ctrl+Z` = undo, `Escape` = discard
+
+Retina-safe canvas rendering (pixel ratio scaling).
+
+**Toolbar:**
+```
+[ ✏ Draw ] [ T Text ] [ ↩ Undo ] [ ✕ Clear ] — [ Discard ] [ Apply ]
+```
+
+Mobile toolbar: docked bottom, full width, 44px minimum touch targets.
+
+### ANB Panel (Notes / Comments / Board)
+
+Right sidebar, always visible in Writers Room.
+
+**Notes tab:**
+- Lists all annotations for the current post (drawings, text, notes)
+- Each item: type badge, author, timestamp, text preview
+- Delete (×) per item → DELETE annotation endpoint
+
+**Comments tab:**
+- Lists all comments with author and timestamp
+- Delete (×) appears on hover — author-only
+- Comment form: textarea (max 500 chars) → POST `/comments` → refresh list
+- Toast on success/failure
+
+**Board tab:**
+- Live mini-snapshot canvas of the pinboard, scaled to fit the sidebar
+- Draws all cards (post pins in status color, sticky notes in amber) and connection lines
+- "Expand → C3" button navigates to the full pinboard
+- Rendered via `Pinboard.drawMini(canvas)` when tab is activated
+
+### Pinboard (C3)
+
+Infinite canvas. HTML5 Canvas. Single-canvas draw.
+
+**State:**
+```js
+cards[]        // pins (posts + sticky notes)
+groups[]       // named clusters with aggregated metadata
+connections[]  // { from, to } pairs
+transform      // { x, y, scale }
+```
+
+**Navigation:**
+- Pan: drag on empty space
+- Zoom: scroll wheel (0.3× – 4× range), +/− buttons, fit-to-screen
+- Keyboard: `E` = edit mode, `F` = fit screen
+
+**Card rendering:**
+- Post pins: dark card with left status-color bar, title (2 lines wrapped), author, status dot
+- Sticky notes: amber/dark card with top amber stripe, yellow text, fold-corner triangle
+- Selected: orange glow + solid orange border
+- Multi-selected (edit mode): blue glow + dashed outer ring
+- Dimmed: 20% opacity (filter or focus mode)
+
+**Filter system:**
+- 4 categories: Topics, Ideologies, Authors, Belief Tags
+- OR-logic within a category, AND-logic across categories
+- Filter chips auto-built from card metadata
+- Badge counter on Filters button shows active count
+- Clear All resets all filters
+- Groups shown if any member card passes the filter
+
+**Context / Focus mode (Attention Lens):**
+- Select a pin or group → context bar appears (type, label, authors, topics)
+- "Focus mode" → dims all unrelated pins, glows selected item and connected neighbors
+- inViewInContextButton 4 states: disabled / "In View" / "Focus" / "Exit Focus"
+- Deselect: click empty space or × in context bar
+
+**Edit mode (D4):**
+- "Edit Board" button toggles edit mode
+- Click cards to multi-select (blue ring), drag to reposition
+- Drag vs click distinction: `mouseMoved` flag with 3px threshold
+- Empty-space click clears multi-select
+- Exiting edit mode saves dirty state, clears selection
+
+**Group creation:**
+- Select 2+ pins → floating action bar slides up from canvas bottom
+- Bar shows: "N pins selected", group name input, Create Group, Unlink Group, Clear
+- Create Group: aggregates authors/topics/ideologies/beliefTags from members, draws connections between consecutive pins, assigns `groupId` to each pin
+- Unlink Group: strips `groupId`, removes connections
+
+**Sticky Notes:**
+- "Edit Board" → "+ Sticky" button appears (edit mode only)
+- Click → floating form at canvas top with text input
+- Enter/Add → places `stickyNote` card at center of visible area with slight random jitter
+- Participates in multi-select, drag, group, context, and filter systems
+
+**Persistence:**
+- Board state saved to `/api/postings/pinboard/:workspace` on edit-mode exit
+- Loaded on C3 init
+
+Only `in-review` and `published` posts appear on the pinboard.
+
+---
+
+## KNOWN BUGS TO AVOID (learned from failed build)
+
+These are bugs that appeared in the previous build. Do not repeat them:
+
+1. **Submit confirm logic:** `submitForReview` must use `window.confirm(...)` and check `if (!result) return` — not `if (!confirm)` which always evaluates false.
+
+2. **ANB annotation preview:** Text annotations save text to `ann.texts[]`, not `ann.text`. The preview must read `ann.texts?.[0]?.text || ann.text`. At apply time, also write a joined `text` preview string to the annotation object so both paths work.
+
+3. **Artifact kind:** If deploying through any platform that asks for an app kind/type, always set it to **`web`**, not `api`. Setting it to `api` will cause the preview pane to render JSON instead of the app UI.
+
+4. **Module system mismatch:** Use CommonJS (`require`) on the server unless you explicitly configure ESM or a TypeScript build pipeline. Mixing `import` and `require` will crash the server.
+
+---
+
+## RESPONSIVE SYSTEM
+
+Breakpoints:
+- Mobile: 0
+- Tablet: 768px
+- Desktop: 1024px
+
+Rules:
+- Use `100dvh` everywhere (not `100vh`)
+- Mobile-first CSS
+- Touch-native interactions throughout
+- Reduced motion support (`prefers-reduced-motion`)
+- No browser chrome feel
+
+---
+
+## BUILD ORDER
+
+1. `server.js` — Express static serving + `/api/healthz` + all API routes with in-memory store
+2. Session system (`session.js`) + URL persistence
+3. Login page (A) wired to `POST /auth/login`
+4. Workspace selection (B)
+5. Subspace selection (C) with C1/C2/C3 tabs
+6. Base CSS design system (tokens, typography, layout)
+7. Three-panel Writers Room shell
+8. Feed panel — cards, search, filters, skeleton loading, seed fallback
+9. Post Viewer (D1)
+10. Post Editor (D2) + Rich Text Toolbar
+11. Feed ↔ Post transitions
+12. Note modal → POST /notes
+13. New Post modal → POST /posts → prepend to feed
+14. ANB panel shell (Notes / Comments / Board tabs)
+15. ANB Notes tab wired to annotations API
+16. ANB Comments tab wired to comments API + delete
+17. Annotation overlay (E1) — draw tool, desktop
+18. Annotation text tool
+19. Undo / Clear / Apply / Discard flow
+20. Mobile touch drawing
+21. Pinboard canvas — pan, zoom, card rendering
+22. Pinboard filter system
+23. Pinboard context / focus mode
+24. Edit mode — multi-select, drag
+25. Group creation flow + sticky notes
+26. Pinboard API persistence (GET/PUT)
+27. ANB Board tab mini-snapshot (`Pinboard.drawMini`)
+28. Error states + localStorage offline fallback
+29. Keyboard shortcuts (global + annotation + pinboard)
+30. Full responsive pass
+31. Reduced motion pass
+32. Final polish + hover tooltips
+
+---
+
+## CRITICAL IMPLEMENTATION RULES
+
+- Never use `alert()`, `confirm()`, or `prompt()` — except `window.confirm()` for the submit-for-review action specifically
+- Inline errors only — no browser dialogs
+- All API keys and URLs from environment variables
+- Console log API timing during development
+- Inline SVG grain texture for surface texture
+- Retina-safe canvas rendering (pixel ratio scaling)
+- Percentage-based annotation coordinate storage
+- Test mobile continuously during build
+- Subtle transitions only
+- No heavy shadows
+- No frontend framework
