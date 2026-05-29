@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useCreateAnnotation, getListAnnotationsQueryKey } from '@workspace/api-client-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { Post, Stroke, TextAnnotation } from '@workspace/api-client-react';
+import { Post } from '@workspace/api-client-react';
 import { Undo2, X, Check, PenTool, Type } from 'lucide-react';
 import { getSession } from '@/session';
 import { useQueryClient } from '@tanstack/react-query';
@@ -14,40 +14,40 @@ interface AnnotationOverlayProps {
 }
 
 export function AnnotationOverlay({ post, onClose }: AnnotationOverlayProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const session = getSession();
 
   const [mode, setMode] = useState<'draw' | 'text'>('draw');
 
-  // All state declared before any function references — avoids TDZ
-  const strokes = useRef<Stroke[]>([]);
-  const texts = useRef<TextAnnotation[]>([]);
-  const [strokesVersion, setStrokesVersion] = useState(0);
-  const [textsVersion, setTextsVersion] = useState(0);
-
+  // State via refs to avoid stale closures in canvas handlers
+  const strokes = useRef<Array<{ points: Array<{ x: number; y: number }> }>>([]);
+  const texts = useRef<Array<{ x: number; y: number; text: string }>>([]);
+  const [strokesVer, setStrokesVer] = useState(0);
+  const [textsVer, setTextsVer] = useState(0);
   const isDrawing = useRef(false);
-  const currentStroke = useRef<{ x: number; y: number }[]>([]);
+  const currentStroke = useRef<Array<{ x: number; y: number }>>([]);
 
-  const [activeTextPos, setActiveTextPos] = useState<{ x: number; y: number; screenX: number; screenY: number } | null>(null);
-  const [textInputValue, setTextInputValue] = useState('');
+  // Text input state — position is in pixels relative to the container
+  const [textPos, setTextPos] = useState<{ px: number; py: number; nx: number; ny: number } | null>(null);
+  const [textValue, setTextValue] = useState('');
+  const textInputRef = useRef<HTMLInputElement>(null);
 
   const createAnnotation = useCreateAnnotation();
 
+  // ── Canvas draw ─────────────────────────────────────────────────────────────
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
     const dpr = window.devicePixelRatio || 1;
     const w = canvas.width / dpr;
     const h = canvas.height / dpr;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
     ctx.save();
     ctx.scale(dpr, dpr);
 
@@ -56,29 +56,23 @@ export function AnnotationOverlay({ post, onClose }: AnnotationOverlayProps) {
     ctx.lineWidth = 2.5;
     ctx.strokeStyle = '#ffffff';
     ctx.shadowBlur = 8;
-    ctx.shadowColor = 'rgba(255,255,255,0.8)';
+    ctx.shadowColor = 'rgba(255,255,255,0.7)';
 
-    const drawStroke = (points: Array<{ x?: number; y?: number }>) => {
-      if (!points || points.length < 2) return;
+    const drawStroke = (pts: Array<{ x: number; y: number }>) => {
+      if (pts.length < 2) return;
       ctx.beginPath();
-      ctx.moveTo((points[0].x ?? 0) * w, (points[0].y ?? 0) * h);
-      for (let i = 1; i < points.length; i++) {
-        ctx.lineTo((points[i].x ?? 0) * w, (points[i].y ?? 0) * h);
-      }
+      ctx.moveTo(pts[0].x * w, pts[0].y * h);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x * w, pts[i].y * h);
       ctx.stroke();
     };
 
-    strokes.current.forEach(s => drawStroke(s.points || []));
-    if (isDrawing.current && currentStroke.current.length > 1) {
-      drawStroke(currentStroke.current);
-    }
+    strokes.current.forEach(s => drawStroke(s.points));
+    if (isDrawing.current && currentStroke.current.length > 1) drawStroke(currentStroke.current);
 
     ctx.shadowBlur = 0;
     ctx.font = 'bold 18px "DM Sans", sans-serif';
     ctx.fillStyle = '#E55A1B';
-    texts.current.forEach(t => {
-      ctx.fillText(t.text || '', (t.x ?? 0) * w, (t.y ?? 0) * h);
-    });
+    texts.current.forEach(t => ctx.fillText(t.text, t.x * w, t.y * h));
 
     ctx.restore();
   }, []);
@@ -102,113 +96,85 @@ export function AnnotationOverlay({ post, onClose }: AnnotationOverlayProps) {
     return () => window.removeEventListener('resize', initCanvas);
   }, [initCanvas]);
 
+  useEffect(() => { redraw(); }, [strokesVer, textsVer, redraw]);
+
+  // Focus text input when it appears
   useEffect(() => {
-    redraw();
-  }, [strokesVersion, textsVersion, redraw]);
+    if (textPos) setTimeout(() => textInputRef.current?.focus(), 20);
+  }, [textPos]);
 
-  const getCanvasPos = (clientX: number, clientY: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: (clientX - rect.left) / rect.width,
-      y: (clientY - rect.top) / rect.height,
-    };
-  };
+  // ── Pointer position — always relative to the container ────────────────────
+  const getPos = useCallback((clientX: number, clientY: number) => {
+    const container = containerRef.current;
+    if (!container) return { px: 0, py: 0, nx: 0, ny: 0 };
+    const rect = container.getBoundingClientRect();
+    const px = clientX - rect.left;
+    const py = clientY - rect.top;
+    return { px, py, nx: px / rect.width, ny: py / rect.height };
+  }, []);
 
-  const handlePointerDown = (e: React.PointerEvent) => {
-    if (activeTextPos) return;
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    if (textPos) return; // text input active, ignore canvas clicks
     e.currentTarget.setPointerCapture(e.pointerId);
+    const pos = getPos(e.clientX, e.clientY);
 
     if (mode === 'draw') {
       isDrawing.current = true;
-      const pos = getCanvasPos(e.clientX, e.clientY);
-      currentStroke.current = [pos];
+      currentStroke.current = [{ x: pos.nx, y: pos.ny }];
     } else if (mode === 'text') {
-      const canvas = canvasRef.current;
-      const rect = canvas?.getBoundingClientRect();
-      if (!rect) return;
-      const pos = getCanvasPos(e.clientX, e.clientY);
-      setActiveTextPos({
-        x: pos.x,
-        y: pos.y,
-        screenX: e.clientX - rect.left,
-        screenY: e.clientY - rect.top,
-      });
-      setTextInputValue('');
+      setTextPos(pos);
+      setTextValue('');
     }
-  };
+  }, [mode, textPos, getPos]);
 
-  const handlePointerMove = (e: React.PointerEvent) => {
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (!isDrawing.current || mode !== 'draw') return;
-    const pos = getCanvasPos(e.clientX, e.clientY);
-    currentStroke.current = [...currentStroke.current, pos];
+    const pos = getPos(e.clientX, e.clientY);
+    currentStroke.current = [...currentStroke.current, { x: pos.nx, y: pos.ny }];
     redraw();
-  };
+  }, [mode, getPos, redraw]);
 
-  const handlePointerUp = () => {
-    if (mode === 'draw' && isDrawing.current) {
-      if (currentStroke.current.length > 1) {
-        strokes.current = [...strokes.current, { points: currentStroke.current }];
-        setStrokesVersion(v => v + 1);
-      }
-      currentStroke.current = [];
-      isDrawing.current = false;
+  const handlePointerUp = useCallback(() => {
+    if (mode === 'draw' && isDrawing.current && currentStroke.current.length > 1) {
+      strokes.current = [...strokes.current, { points: currentStroke.current }];
+      setStrokesVer(v => v + 1);
     }
-  };
+    currentStroke.current = [];
+    isDrawing.current = false;
+  }, [mode]);
 
-  const commitText = () => {
-    if (textInputValue.trim() && activeTextPos) {
-      texts.current = [...texts.current, {
-        x: activeTextPos.x,
-        y: activeTextPos.y,
-        text: textInputValue.trim(),
-      }];
-      setTextsVersion(v => v + 1);
+  const commitText = useCallback(() => {
+    if (textValue.trim() && textPos) {
+      texts.current = [...texts.current, { x: textPos.nx, y: textPos.ny, text: textValue.trim() }];
+      setTextsVer(v => v + 1);
     }
-    setActiveTextPos(null);
-    setTextInputValue('');
-  };
+    setTextPos(null);
+    setTextValue('');
+  }, [textValue, textPos]);
 
-  const cancelText = () => {
-    setActiveTextPos(null);
-    setTextInputValue('');
-  };
+  const cancelText = useCallback(() => { setTextPos(null); setTextValue(''); }, []);
 
-  const undo = () => {
-    if (mode === 'draw') {
-      strokes.current = strokes.current.slice(0, -1);
-      setStrokesVersion(v => v + 1);
-    } else {
-      texts.current = texts.current.slice(0, -1);
-      setTextsVersion(v => v + 1);
-    }
-  };
+  const undo = useCallback(() => {
+    if (mode === 'draw') { strokes.current = strokes.current.slice(0, -1); setStrokesVer(v => v + 1); }
+    else { texts.current = texts.current.slice(0, -1); setTextsVer(v => v + 1); }
+  }, [mode]);
 
-  const clear = () => {
-    strokes.current = [];
-    texts.current = [];
-    setStrokesVersion(v => v + 1);
-    setTextsVersion(v => v + 1);
-  };
+  const clear = useCallback(() => {
+    strokes.current = []; texts.current = [];
+    setStrokesVer(v => v + 1); setTextsVer(v => v + 1);
+  }, []);
 
   const handleApply = async () => {
-    if (!strokes.current.length && !texts.current.length) {
-      onClose();
-      return;
-    }
+    if (!strokes.current.length && !texts.current.length) { onClose(); return; }
     if (!session) return;
-
-    const textPreview = texts.current.map(t => t.text).join(' ');
-
     try {
       await createAnnotation.mutateAsync({
         postId: post.id,
         data: {
           type: strokes.current.length > 0 ? 'drawing' : 'text',
-          strokes: strokes.current,
+          strokes: strokes.current.map(s => ({ points: s.points })),
           texts: texts.current,
-          text: textPreview,
+          text: texts.current.map(t => t.text).join(' '),
           authorId: session.userId,
           authorName: session.userName,
         } as any
@@ -221,58 +187,37 @@ export function AnnotationOverlay({ post, onClose }: AnnotationOverlayProps) {
     }
   };
 
+  // Keyboard shortcuts
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (activeTextPos) { cancelText(); return; }
-        onClose();
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
-        e.preventDefault();
-        undo();
-      }
-      if (e.key === 'd' || e.key === 'D') setMode('draw');
-      if (e.key === 't' || e.key === 'T') setMode('text');
+    const h = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { if (textPos) cancelText(); else onClose(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); }
+      if (!textPos && e.key === 'd') setMode('draw');
+      if (!textPos && e.key === 't') setMode('text');
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [activeTextPos, onClose]);
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [textPos, onClose, undo, cancelText]);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" ref={containerRef}>
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" />
+    <div ref={containerRef} className="fixed inset-0 z-50 flex flex-col">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/25 backdrop-blur-[1px]" />
 
-      {/* Toolbar — top center on desktop, bottom on mobile */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 bg-black/70 border border-white/10 backdrop-blur rounded-full px-2 py-1 shadow-lg max-md:top-auto max-md:bottom-6 max-md:translate-x-0 max-md:left-4 max-md:right-4 max-md:rounded-xl max-md:justify-center">
-        <ToolBtn active={mode === 'draw'} onClick={() => setMode('draw')}>
-          <PenTool className="w-3.5 h-3.5" /> <span>Draw</span>
-        </ToolBtn>
-        <ToolBtn active={mode === 'text'} onClick={() => setMode('text')}>
-          <Type className="w-3.5 h-3.5" /> <span>Text</span>
-        </ToolBtn>
-        <div className="w-px h-5 bg-white/10 mx-1" />
-        <ToolBtn onClick={undo}>
-          <Undo2 className="w-3.5 h-3.5" /> <span>Undo</span>
-        </ToolBtn>
-        <ToolBtn onClick={clear}>
-          <X className="w-3.5 h-3.5" /> <span>Clear</span>
-        </ToolBtn>
-        <div className="w-px h-5 bg-white/10 mx-1" />
-        <button
-          onClick={onClose}
-          className="px-3 py-1.5 text-xs text-white/60 hover:text-white transition-colors rounded-full"
-        >
-          Discard
-        </button>
-        <button
-          onClick={handleApply}
-          disabled={createAnnotation.isPending}
-          className="px-3 py-1.5 text-xs bg-primary text-white rounded-full hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1.5"
-        >
-          <Check className="w-3 h-3" /> Apply
-        </button>
+      {/* Desktop toolbar — top center */}
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 max-md:hidden">
+        <AnnotationToolbar
+          mode={mode}
+          onMode={setMode}
+          onUndo={undo}
+          onClear={clear}
+          onDiscard={onClose}
+          onApply={handleApply}
+          isPending={createAnnotation.isPending}
+        />
       </div>
 
+      {/* Canvas — positioned relative to container for correct text input placement */}
       <canvas
         ref={canvasRef}
         className="absolute inset-0 w-full h-full"
@@ -282,49 +227,130 @@ export function AnnotationOverlay({ post, onClose }: AnnotationOverlayProps) {
         onPointerUp={handlePointerUp}
       />
 
-      {activeTextPos && (
+      {/* Text input — positioned using container-relative px/py */}
+      {textPos && (
         <input
-          autoFocus
-          value={textInputValue}
-          onChange={e => setTextInputValue(e.target.value)}
+          ref={textInputRef}
+          value={textValue}
+          onChange={e => setTextValue(e.target.value)}
           onKeyDown={e => {
             if (e.key === 'Enter') { e.preventDefault(); commitText(); }
             if (e.key === 'Escape') { e.preventDefault(); cancelText(); }
           }}
           onBlur={commitText}
-          className="absolute z-20 bg-black/40 backdrop-blur-sm border border-primary/50 text-primary px-3 py-1.5 text-base font-bold rounded outline-none min-w-[120px]"
+          placeholder="Type text…"
+          className="absolute z-30 bg-black/50 backdrop-blur-sm border border-primary/60 text-primary font-bold px-3 py-1.5 text-base rounded outline-none min-w-[120px] max-w-[280px]"
           style={{
-            left: `${activeTextPos.screenX}px`,
-            top: `${activeTextPos.screenY}px`,
+            left: `${textPos.px}px`,
+            top: `${textPos.py}px`,
             transform: 'translate(-4px, -50%)',
           }}
-          placeholder="Type text…"
         />
       )}
+
+      {/* Mobile toolbar — full-width bottom dock */}
+      <div className="absolute bottom-0 left-0 right-0 z-20 md:hidden safe-area-bottom">
+        <AnnotationToolbar
+          mode={mode}
+          onMode={setMode}
+          onUndo={undo}
+          onClear={clear}
+          onDiscard={onClose}
+          onApply={handleApply}
+          isPending={createAnnotation.isPending}
+          mobile
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── Shared annotation toolbar ──────────────────────────────────────────────────
+
+function AnnotationToolbar({
+  mode, onMode, onUndo, onClear, onDiscard, onApply, isPending, mobile = false,
+}: {
+  mode: 'draw' | 'text';
+  onMode: (m: 'draw' | 'text') => void;
+  onUndo: () => void;
+  onClear: () => void;
+  onDiscard: () => void;
+  onApply: () => void;
+  isPending: boolean;
+  mobile?: boolean;
+}) {
+  if (mobile) {
+    return (
+      <div className="bg-black/80 backdrop-blur border-t border-white/10 px-4 py-3 flex items-center justify-between gap-2">
+        <div className="flex gap-1">
+          <ToolBtn active={mode === 'draw'} onClick={() => onMode('draw')} label="Draw" icon={<PenTool className="w-4 h-4" />} size="lg" />
+          <ToolBtn active={mode === 'text'} onClick={() => onMode('text')} label="Text" icon={<Type className="w-4 h-4" />} size="lg" />
+        </div>
+        <div className="flex gap-1">
+          <ToolBtn onClick={onUndo} icon={<Undo2 className="w-4 h-4" />} label="Undo" size="lg" />
+          <ToolBtn onClick={onClear} icon={<X className="w-4 h-4" />} label="Clear" size="lg" />
+        </div>
+        <div className="flex gap-1">
+          <button onClick={onDiscard} className="px-3 py-2 text-xs text-white/60 hover:text-white rounded min-h-[44px] min-w-[44px]">Discard</button>
+          <button
+            onClick={onApply}
+            disabled={isPending}
+            className="px-4 py-2 text-xs bg-primary text-white rounded hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5 min-h-[44px]"
+          >
+            <Check className="w-3.5 h-3.5" /> Apply
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1 bg-black/70 border border-white/10 backdrop-blur rounded-full px-2 py-1 shadow-xl">
+      <ToolBtn active={mode === 'draw'} onClick={() => onMode('draw')} icon={<PenTool className="w-3.5 h-3.5" />} label="Draw" />
+      <ToolBtn active={mode === 'text'} onClick={() => onMode('text')} icon={<Type className="w-3.5 h-3.5" />} label="Text" />
+      <Divider />
+      <ToolBtn onClick={onUndo} icon={<Undo2 className="w-3.5 h-3.5" />} label="Undo" />
+      <ToolBtn onClick={onClear} icon={<X className="w-3.5 h-3.5" />} label="Clear" />
+      <Divider />
+      <button onClick={onDiscard} className="px-2.5 py-1.5 text-xs text-white/60 hover:text-white rounded-full transition-colors">
+        Discard
+      </button>
+      <button
+        onClick={onApply}
+        disabled={isPending}
+        className="px-3 py-1.5 text-xs bg-primary text-white rounded-full hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+      >
+        <Check className="w-3 h-3" /> Apply
+      </button>
     </div>
   );
 }
 
 function ToolBtn({
-  children,
-  active,
-  onClick,
+  active, onClick, icon, label, size = 'sm',
 }: {
-  children: React.ReactNode;
   active?: boolean;
   onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  size?: 'sm' | 'lg';
 }) {
   return (
     <button
       onClick={onClick}
+      title={label}
       className={cn(
-        "flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-full transition-all min-h-[36px]",
-        active
-          ? "bg-white/20 text-white"
-          : "text-white/60 hover:text-white hover:bg-white/10"
+        'flex items-center gap-1.5 rounded-full transition-all',
+        size === 'lg' ? 'px-3 py-2 text-sm min-h-[44px] min-w-[44px] justify-center' : 'px-2.5 py-1.5 text-xs',
+        active ? 'bg-white/20 text-white' : 'text-white/60 hover:text-white hover:bg-white/10'
       )}
     >
-      {children}
+      {icon}
+      <span className={size === 'lg' ? 'hidden' : ''}>{label}</span>
     </button>
   );
+}
+
+function Divider() {
+  return <div className="w-px h-5 bg-white/10 mx-0.5" />;
 }

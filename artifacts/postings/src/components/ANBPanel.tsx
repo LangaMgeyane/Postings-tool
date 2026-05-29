@@ -1,13 +1,15 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   useListAnnotations,
   useListComments,
   useDeleteAnnotation,
   useDeleteComment,
   useCreateComment,
+  useGetPinboard,
   getListAnnotationsQueryKey,
   getListCommentsQueryKey
 } from '@workspace/api-client-react';
+import { Annotation, PinCard } from '@workspace/api-client-react';
 import { getSession } from '@/session';
 import { formatDistanceToNow } from 'date-fns';
 import { X, PenTool, Type, MessageSquare, Loader2, ArrowRight } from 'lucide-react';
@@ -17,64 +19,60 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'wouter';
 import { cn } from '@/lib/utils';
 
-export function ANBPanel() {
+interface ANBPanelProps {
+  onClose?: () => void;
+}
+
+export function ANBPanel({ onClose }: ANBPanelProps) {
   const session = getSession();
   const [activeTab, setActiveTab] = useState<'notes' | 'comments' | 'board'>('notes');
   const postId = session?.selectedPostId;
 
   return (
-    <div className="flex flex-col h-full bg-sidebar border-l border-border/50 text-sidebar-foreground">
-      <div className="flex h-11 border-b border-border/50 shrink-0">
+    <div className="flex flex-col h-full bg-sidebar text-sidebar-foreground">
+      <div className="flex h-11 border-b border-border/40 shrink-0">
         {(['notes', 'comments', 'board'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={cn(
-              "flex-1 text-[10px] font-semibold uppercase tracking-widest transition-colors",
-              activeTab === tab
-                ? "border-b-2 border-primary text-primary"
-                : "text-muted-foreground hover:text-foreground"
+              'flex-1 text-[9px] font-semibold uppercase tracking-widest transition-colors',
+              activeTab === tab ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground hover:text-foreground'
             )}
           >
             {tab}
           </button>
         ))}
+        {onClose && (
+          <button onClick={onClose} className="px-3 text-muted-foreground hover:text-foreground transition-colors">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
       <div className="flex-1 overflow-hidden flex flex-col">
         {activeTab === 'notes' && <NotesTab postId={postId} />}
         {activeTab === 'comments' && <CommentsTab postId={postId} />}
-        {activeTab === 'board' && <BoardTab />}
+        {activeTab === 'board' && <BoardTab postId={postId} />}
       </div>
     </div>
   );
 }
+
+// ── Notes tab ─────────────────────────────────────────────────────────────────
 
 function NotesTab({ postId }: { postId?: string }) {
   const session = getSession();
   const queryClient = useQueryClient();
   const deleteAnnotation = useDeleteAnnotation();
   const { toast } = useToast();
+  const [previewAnn, setPreviewAnn] = useState<Annotation | null>(null);
 
   const { data: annotations, isLoading } = useListAnnotations(postId || '', {
-    query: {
-      enabled: !!postId,
-      queryKey: getListAnnotationsQueryKey(postId || '')
-    }
+    query: { enabled: !!postId, queryKey: getListAnnotationsQueryKey(postId || '') }
   });
 
-  if (!postId) {
-    return (
-      <div className="p-4 text-center text-xs text-muted-foreground mt-8">
-        Select a post to view notes
-      </div>
-    );
-  }
-
-  if (isLoading) {
-    return <div className="p-4 text-center text-xs text-muted-foreground">Loading...</div>;
-  }
-
   const handleDelete = async (id: string) => {
+    if (!postId) return;
     try {
       await deleteAnnotation.mutateAsync({ postId, annId: id });
       queryClient.invalidateQueries({ queryKey: getListAnnotationsQueryKey(postId) });
@@ -83,52 +81,114 @@ function NotesTab({ postId }: { postId?: string }) {
     }
   };
 
-  if (!annotations?.length) {
-    return (
-      <div className="p-4 text-center text-xs text-muted-foreground mt-8">
-        No annotations yet
-      </div>
-    );
-  }
+  if (!postId) return <EmptyState message="Select a post to view notes" />;
+  if (isLoading) return <EmptyState message="Loading…" />;
+  if (!annotations?.length) return <EmptyState message="No annotations yet" />;
 
   return (
-    <div className="flex-1 overflow-y-auto p-3 space-y-2">
+    <div className="flex-1 overflow-y-auto p-3 space-y-2 relative">
       {annotations.map(ann => (
-        <div key={ann.id} className="relative group p-3 bg-surface/50 border border-border/40 rounded text-xs">
-          <div className="flex items-center justify-between mb-1.5">
-            <div className="flex items-center gap-1.5">
-              <span className="text-primary/80">
-                {ann.type === 'drawing' ? <PenTool className="w-3 h-3" /> :
-                 ann.type === 'text' ? <Type className="w-3 h-3" /> :
-                 <MessageSquare className="w-3 h-3" />}
-              </span>
-              {ann.noteType && (
-                <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 bg-primary/10 text-primary rounded-sm">
-                  {ann.noteType}
-                </span>
-              )}
-              <span className="font-semibold text-foreground/80">{ann.authorName}</span>
-            </div>
-            <span className="text-[9px] text-muted-foreground">
-              {formatDistanceToNow(new Date(ann.createdAt))} ago
-            </span>
-          </div>
-          <p className="text-muted-foreground leading-snug line-clamp-3">
-            {ann.texts?.[0]?.text ?? ann.text ?? '(drawing)'}
-          </p>
-          {session?.userId === ann.authorId && (
+        <div key={ann.id} className="relative group p-3 bg-surface/40 border border-border/30 rounded text-xs">
+          <div className="flex items-start gap-2 mb-1.5">
+            {/* Tack icon — click to preview */}
             <button
-              onClick={() => handleDelete(ann.id)}
-              className="absolute top-2 right-2 p-1 opacity-0 group-hover:opacity-100 hover:text-destructive transition-all"
+              className="mt-0.5 text-primary/50 hover:text-primary transition-colors shrink-0 p-0.5 rounded min-w-[20px] min-h-[20px] flex items-center justify-center"
+              onClick={() => setPreviewAnn(previewAnn?.id === ann.id ? null : ann)}
+              title="Preview annotation"
             >
-              <X className="w-3 h-3" />
+              {ann.type === 'drawing' ? <PenTool className="w-3 h-3" /> :
+               ann.type === 'text' ? <Type className="w-3 h-3" /> :
+               <MessageSquare className="w-3 h-3" />}
             </button>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {ann.noteType && (
+                  <span className="text-[8px] uppercase tracking-wider px-1.5 py-0.5 bg-primary/10 text-primary rounded-sm">
+                    {ann.noteType}
+                  </span>
+                )}
+                <span className="font-semibold text-foreground/80">{ann.authorName}</span>
+                <span className="text-[9px] text-muted-foreground/60">
+                  {formatDistanceToNow(new Date(ann.createdAt))} ago
+                </span>
+              </div>
+              <p className="text-muted-foreground leading-snug mt-1 line-clamp-3">
+                {ann.texts?.[0]?.text ?? ann.text ?? '(drawing)'}
+              </p>
+            </div>
+            {session?.userId === ann.authorId && (
+              <button
+                onClick={() => handleDelete(ann.id)}
+                className="p-1 opacity-0 group-hover:opacity-100 hover:text-destructive transition-all shrink-0"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
+          {/* Annotation preview popover */}
+          {previewAnn?.id === ann.id && (
+            <AnnotationPreview ann={ann} onClose={() => setPreviewAnn(null)} />
           )}
         </div>
       ))}
     </div>
   );
 }
+
+function AnnotationPreview({ ann, onClose }: { ann: Annotation; onClose: () => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (ann.type !== 'drawing') return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.lineCap = 'round';
+    ctx.shadowBlur = 4;
+    ctx.shadowColor = 'rgba(255,255,255,0.6)';
+    (ann.strokes || []).forEach((s: any) => {
+      const pts = s.points || [];
+      if (pts.length < 2) return;
+      ctx.beginPath();
+      ctx.moveTo((pts[0].x ?? 0) * w, (pts[0].y ?? 0) * h);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo((pts[i].x ?? 0) * w, (pts[i].y ?? 0) * h);
+      ctx.stroke();
+    });
+    (ann.texts || []).forEach((t: any) => {
+      ctx.fillStyle = '#E55A1B';
+      ctx.font = '12px "DM Sans", sans-serif';
+      ctx.fillText(t.text || '', (t.x ?? 0) * w, (t.y ?? 0) * h);
+    });
+  }, [ann]);
+
+  if (ann.type === 'note' || (ann.type === 'text' && !ann.strokes?.length)) {
+    return (
+      <div className="mt-2 p-2 bg-background/60 rounded border border-border/30 relative">
+        <button onClick={onClose} className="absolute top-1 right-1 text-muted-foreground hover:text-foreground">
+          <X className="w-3 h-3" />
+        </button>
+        <p className="text-xs text-muted-foreground pr-4">{ann.text}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 relative rounded overflow-hidden border border-border/30" style={{ height: 80 }}>
+      <button onClick={onClose} className="absolute top-1 right-1 z-10 text-white/60 hover:text-white bg-black/30 rounded p-0.5">
+        <X className="w-3 h-3" />
+      </button>
+      <canvas ref={canvasRef} width={200} height={80} className="w-full h-full bg-black/40" />
+    </div>
+  );
+}
+
+// ── Comments tab ──────────────────────────────────────────────────────────────
 
 function CommentsTab({ postId }: { postId?: string }) {
   const session = getSession();
@@ -140,29 +200,18 @@ function CommentsTab({ postId }: { postId?: string }) {
   const { toast } = useToast();
 
   const { data: comments, isLoading } = useListComments(postId || '', {
-    query: {
-      enabled: !!postId,
-      queryKey: getListCommentsQueryKey(postId || '')
-    }
+    query: { enabled: !!postId, queryKey: getListCommentsQueryKey(postId || '') }
   });
 
   const handleSubmit = async () => {
     const text = textareaRef.current?.value?.trim();
     if (!text || !postId || !session) return;
-
     try {
       await createComment.mutateAsync({
         postId,
-        data: {
-          text,
-          authorId: session.userId,
-          authorName: session.userName,
-        } as any
+        data: { text, authorId: session.userId, authorName: session.userName } as any
       });
-      if (textareaRef.current) {
-        textareaRef.current.value = '';
-        setCharCount(0);
-      }
+      if (textareaRef.current) { textareaRef.current.value = ''; setCharCount(0); }
       queryClient.invalidateQueries({ queryKey: getListCommentsQueryKey(postId) });
     } catch (e: any) {
       toast({ title: 'Failed to post', description: e.message, variant: 'destructive' });
@@ -179,70 +228,45 @@ function CommentsTab({ postId }: { postId?: string }) {
     }
   };
 
-  if (!postId) {
-    return (
-      <div className="p-4 text-center text-xs text-muted-foreground mt-8">
-        Select a post to view comments
-      </div>
-    );
-  }
+  if (!postId) return <EmptyState message="Select a post to comment" />;
 
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        {isLoading ? (
-          <div className="text-center text-xs text-muted-foreground">Loading...</div>
-        ) : !comments?.length ? (
-          <div className="text-center text-xs text-muted-foreground mt-8">No comments yet</div>
-        ) : (
-          comments.map(c => (
-            <div key={c.id} className="relative group text-xs">
-              <div className="flex items-center gap-1.5 mb-1">
-                <span className="font-semibold text-foreground/90">{c.authorName}</span>
-                <span className="text-[9px] text-muted-foreground">
-                  {formatDistanceToNow(new Date(c.createdAt))} ago
-                </span>
-              </div>
-              <p className="text-muted-foreground leading-relaxed">{c.text}</p>
-              {session?.userId === c.authorId && (
-                <button
-                  onClick={() => handleDelete(c.id)}
-                  className="absolute top-0 right-0 p-1 opacity-0 group-hover:opacity-100 hover:text-destructive transition-all"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              )}
-            </div>
-          ))
-        )}
+        {isLoading ? <EmptyState message="Loading…" /> :
+         !comments?.length ? <EmptyState message="No comments yet" /> :
+         comments.map(c => (
+           <div key={c.id} className="relative group text-xs">
+             <div className="flex items-center gap-1.5 mb-1">
+               <span className="font-semibold text-foreground/85">{c.authorName}</span>
+               <span className="text-[9px] text-muted-foreground/50">
+                 {formatDistanceToNow(new Date(c.createdAt))} ago
+               </span>
+             </div>
+             <p className="text-muted-foreground/80 leading-relaxed">{c.text}</p>
+             {session?.userId === c.authorId && (
+               <button onClick={() => handleDelete(c.id)} className="absolute top-0 right-0 p-1 opacity-0 group-hover:opacity-100 hover:text-destructive transition-all">
+                 <X className="w-3 h-3" />
+               </button>
+             )}
+           </div>
+         ))
+        }
       </div>
-      <div className="p-3 border-t border-border/50 shrink-0">
+      <div className="p-3 border-t border-border/40 shrink-0">
         <textarea
           ref={textareaRef}
-          placeholder="Write a comment..."
+          placeholder="Write a comment…"
           maxLength={500}
           onChange={e => setCharCount(e.target.value.length)}
-          onKeyDown={e => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              handleSubmit();
-            }
-          }}
-          className="w-full bg-background/60 border border-border/40 text-xs text-foreground placeholder:text-muted-foreground/40 rounded p-2 resize-none min-h-[64px] outline-none focus:border-border transition-colors"
+          onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleSubmit(); } }}
+          className="w-full bg-background/50 border border-border/30 text-xs text-foreground placeholder:text-muted-foreground/30 rounded p-2 resize-none min-h-[56px] outline-none focus:border-border/60 transition-colors"
         />
         <div className="flex justify-between items-center mt-1.5">
-          <span className={cn(
-            "text-[9px] transition-colors",
-            charCount > 450 ? "text-primary" : "text-muted-foreground"
-          )}>
+          <span className={cn('text-[9px] transition-colors', charCount > 450 ? 'text-primary' : 'text-muted-foreground/40')}>
             {charCount}/500
           </span>
-          <Button
-            size="sm"
-            onClick={handleSubmit}
-            disabled={charCount === 0 || createComment.isPending}
-            className="h-7 text-xs px-3"
-          >
+          <Button size="sm" onClick={handleSubmit} disabled={charCount === 0 || createComment.isPending} className="h-7 text-xs px-3">
             {createComment.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Post'}
           </Button>
         </div>
@@ -251,47 +275,175 @@ function CommentsTab({ postId }: { postId?: string }) {
   );
 }
 
-function BoardTab() {
+// ── Board tab ─────────────────────────────────────────────────────────────────
+
+function BoardTab({ postId }: { postId?: string }) {
   const [, setLocation] = useLocation();
+  const { data: board } = useGetPinboard('WR');
+
+  const currentCard = postId && board?.cards
+    ? board.cards.find(c => c.postId === postId) ?? null
+    : null;
+
+  const groupCards = currentCard?.groupId && board?.cards
+    ? board.cards.filter(c => c.groupId === currentCard.groupId)
+    : currentCard ? [currentCard] : [];
+
+  const groupConns = board?.connections?.filter(cn =>
+    groupCards.some(c => c.id === cn.from) && groupCards.some(c => c.id === cn.to)
+  ) ?? [];
+
+  if (!postId) {
+    return (
+      <div className="p-3 h-full flex flex-col">
+        <EmptyState message="Select a post to see board context" />
+        <Button variant="outline" size="sm" className="w-full h-8 text-xs border-border/40 text-muted-foreground hover:text-foreground mt-auto mx-3 mb-3 w-[calc(100%-1.5rem)]"
+          onClick={() => setLocation('/writers-room?subspace=c3')}>
+          Open Board <ArrowRight className="w-3 h-3 ml-2" />
+        </Button>
+      </div>
+    );
+  }
 
   return (
-    <div className="p-3 h-full flex flex-col">
-      <div className="flex-1 bg-surface/40 border border-border/30 rounded mb-3 overflow-hidden relative min-h-[120px]">
-        <div
-          className="absolute inset-0 opacity-10"
-          style={{
-            backgroundImage: 'radial-gradient(circle at 2px 2px, rgba(255,255,255,0.15) 1px, transparent 0)',
-            backgroundSize: '16px 16px'
-          }}
-        />
-        <svg className="absolute inset-0 w-full h-full" style={{ pointerEvents: 'none' }}>
-          <line x1="30%" y1="40%" x2="55%" y2="40%" stroke="#333" strokeWidth="1" />
-          <line x1="55%" y1="40%" x2="45%" y2="65%" stroke="#333" strokeWidth="1" />
-        </svg>
-        <div className="absolute" style={{ left: '18%', top: '25%' }}>
-          <div className="w-[80px] h-[52px] bg-card border border-border/50 rounded-sm shadow" style={{ borderLeft: '3px solid #22c55e' }}>
-            <div className="p-1.5 text-[7px] text-foreground/60 leading-tight font-medium">Monoculture</div>
-          </div>
-        </div>
-        <div className="absolute" style={{ left: '44%', top: '22%' }}>
-          <div className="w-[80px] h-[52px] bg-card border border-border/50 rounded-sm shadow" style={{ borderLeft: '3px solid #22c55e' }}>
-            <div className="p-1.5 text-[7px] text-foreground/60 leading-tight font-medium">Authentic</div>
-          </div>
-        </div>
-        <div className="absolute" style={{ left: '30%', top: '55%' }}>
-          <div className="w-[72px] h-[36px] bg-[#2a2000] border border-amber-900/50 rounded-sm shadow">
-            <div className="p-1 text-[7px] text-amber-400/70 leading-tight">Theme cluster…</div>
-          </div>
-        </div>
+    <div className="p-3 h-full flex flex-col gap-3">
+      <div className="flex-1 bg-surface/30 border border-border/25 rounded overflow-hidden relative min-h-[120px]">
+        {currentCard
+          ? <BoardMiniCanvas cards={groupCards} connections={groupConns} focusedCard={currentCard} />
+          : <EmptyState message="This post has no pin on the board yet" />
+        }
       </div>
       <Button
         variant="outline"
         size="sm"
-        className="w-full h-8 text-xs border-border/50 text-muted-foreground hover:text-foreground"
+        className="w-full h-8 text-xs border-border/40 text-muted-foreground hover:text-foreground shrink-0"
         onClick={() => setLocation('/writers-room?subspace=c3')}
       >
-        Open Board <ArrowRight className="w-3 h-3 ml-2" />
+        {currentCard ? 'Center on this pin' : 'Open Board'}
+        <ArrowRight className="w-3 h-3 ml-2" />
       </Button>
+    </div>
+  );
+}
+
+function BoardMiniCanvas({ cards, connections, focusedCard }: {
+  cards: PinCard[];
+  connections: { from: string; to: string }[];
+  focusedCard: PinCard;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const cw = container.clientWidth;
+    const ch = container.clientHeight;
+    canvas.width = cw * dpr;
+    canvas.height = ch * dpr;
+    canvas.style.width = `${cw}px`;
+    canvas.style.height = `${ch}px`;
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, cw, ch);
+
+    if (cards.length === 0) return;
+
+    const CARD_W = 160, CARD_H = 80;
+    const STICKY_W = 120, STICKY_H = 100;
+
+    function cw2(c: PinCard) { return c.type === 'stickyNote' ? STICKY_W : CARD_W; }
+    function ch2(c: PinCard) { return c.type === 'stickyNote' ? STICKY_H : CARD_H; }
+    function scX(c: PinCard) { return c.x ?? 0; }
+    function scY(c: PinCard) { return c.y ?? 0; }
+
+    // Compute bounds of all group cards
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    cards.forEach(c => {
+      const x = scX(c), y = scY(c), w = cw2(c), h = ch2(c);
+      minX = Math.min(minX, x); minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+    });
+
+    const PAD = 20;
+    const bw = maxX - minX + PAD * 2;
+    const bh = maxY - minY + PAD * 2;
+    const scale = Math.min((cw - 20) / bw, (ch - 20) / bh, 1);
+    const ox = (cw - bw * scale) / 2 - (minX - PAD) * scale;
+    const oy = (ch - bh * scale) / 2 - (minY - PAD) * scale;
+
+    // Connections
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 1;
+    connections.forEach(conn => {
+      const from = cards.find(c => c.id === conn.from);
+      const to = cards.find(c => c.id === conn.to);
+      if (!from || !to) return;
+      const fx = scX(from) * scale + ox + cw2(from) * scale / 2;
+      const fy = scY(from) * scale + oy + ch2(from) * scale / 2;
+      const tx = scX(to) * scale + ox + cw2(to) * scale / 2;
+      const ty = scY(to) * scale + oy + ch2(to) * scale / 2;
+      ctx.beginPath();
+      ctx.moveTo(fx, fy);
+      ctx.bezierCurveTo(fx + (tx - fx) * 0.5, fy, fx + (tx - fx) * 0.5, ty, tx, ty);
+      ctx.stroke();
+    });
+
+    // Cards
+    cards.forEach(c => {
+      const x = scX(c) * scale + ox;
+      const y = scY(c) * scale + oy;
+      const w = cw2(c) * scale;
+      const h = ch2(c) * scale;
+      const isFocused = c.id === focusedCard.id;
+
+      ctx.fillStyle = c.type === 'stickyNote' ? '#1e1700' : '#1a1a1a';
+      ctx.fillRect(x, y, w, h);
+
+      if (c.type === 'post') {
+        const sc = c.status === 'published' ? '#22c55e' : c.status === 'in-review' ? '#f59e0b' : '#64748b';
+        ctx.fillStyle = sc;
+        ctx.fillRect(x, y, Math.max(2, 4 * scale), h);
+      }
+
+      if (isFocused) {
+        ctx.strokeStyle = '#E55A1B';
+        ctx.lineWidth = 1.5;
+        ctx.shadowColor = '#E55A1B60';
+        ctx.shadowBlur = 6;
+        ctx.strokeRect(x - 1, y - 1, w + 2, h + 2);
+        ctx.shadowBlur = 0;
+      }
+
+      // Title text at sufficient scale
+      if (scale > 0.3) {
+        ctx.fillStyle = c.type === 'stickyNote' ? '#d97706' : '#e0deda';
+        ctx.font = `${Math.max(7, 11 * scale)}px "DM Sans", sans-serif`;
+        const title = (c.type === 'stickyNote' ? c.noteText : c.title) || '';
+        ctx.fillText(title.slice(0, 18), x + 6 * scale, y + 14 * scale);
+      }
+    });
+  }, [cards, connections, focusedCard]);
+
+  useEffect(() => {
+    draw();
+    window.addEventListener('resize', draw);
+    return () => window.removeEventListener('resize', draw);
+  }, [draw]);
+
+  return <div ref={containerRef} className="absolute inset-0"><canvas ref={canvasRef} className="w-full h-full" /></div>;
+}
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+function EmptyState({ message }: { message: string }) {
+  return (
+    <div className="flex-1 flex items-center justify-center p-4">
+      <p className="text-xs text-muted-foreground/40 text-center">{message}</p>
     </div>
   );
 }
