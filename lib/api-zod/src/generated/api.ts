@@ -17,7 +17,7 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
- * @summary Login via Slack handle
+ * @summary Login
  */
 export const LoginBody = zod.object({
   "displayName": zod.string()
@@ -28,7 +28,8 @@ export const LoginResponse = zod.object({
   "displayName": zod.string(),
   "name": zod.string(),
   "tags": zod.array(zod.string()),
-  "createdAt": zod.string()
+  "createdAt": zod.string(),
+  "isAdmin": zod.boolean().optional()
 })
 
 
@@ -47,13 +48,14 @@ export const ListPostsResponseItem = zod.object({
   "excerpt": zod.string(),
   "authorId": zod.string(),
   "authorName": zod.string(),
-  "status": zod.enum(['draft', 'in-review', 'published']),
+  "status": zod.enum(['draft', 'in-review', 'publish']),
   "category": zod.string(),
   "tags": zod.array(zod.string()),
   "createdAt": zod.string(),
   "updatedAt": zod.string(),
   "annotationCount": zod.number(),
-  "noteCount": zod.number()
+  "noteCount": zod.number(),
+  "readyForGallery": zod.boolean().optional()
 })
 export const ListPostsResponse = zod.array(ListPostsResponseItem)
 
@@ -84,13 +86,14 @@ export const GetPostResponse = zod.object({
   "excerpt": zod.string(),
   "authorId": zod.string(),
   "authorName": zod.string(),
-  "status": zod.enum(['draft', 'in-review', 'published']),
+  "status": zod.enum(['draft', 'in-review', 'publish']),
   "category": zod.string(),
   "tags": zod.array(zod.string()),
   "createdAt": zod.string(),
   "updatedAt": zod.string(),
   "annotationCount": zod.number(),
-  "noteCount": zod.number()
+  "noteCount": zod.number(),
+  "readyForGallery": zod.boolean().optional()
 })
 
 
@@ -106,7 +109,8 @@ export const UpdatePostBody = zod.object({
   "body": zod.string().optional(),
   "excerpt": zod.string().optional(),
   "category": zod.string().optional(),
-  "tags": zod.array(zod.string()).optional()
+  "tags": zod.array(zod.string()).optional(),
+  "status": zod.string().optional()
 })
 
 export const UpdatePostResponse = zod.object({
@@ -116,18 +120,19 @@ export const UpdatePostResponse = zod.object({
   "excerpt": zod.string(),
   "authorId": zod.string(),
   "authorName": zod.string(),
-  "status": zod.enum(['draft', 'in-review', 'published']),
+  "status": zod.enum(['draft', 'in-review', 'publish']),
   "category": zod.string(),
   "tags": zod.array(zod.string()),
   "createdAt": zod.string(),
   "updatedAt": zod.string(),
   "annotationCount": zod.number(),
-  "noteCount": zod.number()
+  "noteCount": zod.number(),
+  "readyForGallery": zod.boolean().optional()
 })
 
 
 /**
- * @summary Submit post for review
+ * @summary Submit post for review (draft → in-review)
  */
 export const SubmitPostParams = zod.object({
   "postId": zod.coerce.string()
@@ -140,13 +145,39 @@ export const SubmitPostResponse = zod.object({
   "excerpt": zod.string(),
   "authorId": zod.string(),
   "authorName": zod.string(),
-  "status": zod.enum(['draft', 'in-review', 'published']),
+  "status": zod.enum(['draft', 'in-review', 'publish']),
   "category": zod.string(),
   "tags": zod.array(zod.string()),
   "createdAt": zod.string(),
   "updatedAt": zod.string(),
   "annotationCount": zod.number(),
-  "noteCount": zod.number()
+  "noteCount": zod.number(),
+  "readyForGallery": zod.boolean().optional()
+})
+
+
+/**
+ * @summary Publish post (in-review → publish, admin only)
+ */
+export const PublishPostParams = zod.object({
+  "postId": zod.coerce.string()
+})
+
+export const PublishPostResponse = zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "body": zod.string(),
+  "excerpt": zod.string(),
+  "authorId": zod.string(),
+  "authorName": zod.string(),
+  "status": zod.enum(['draft', 'in-review', 'publish']),
+  "category": zod.string(),
+  "tags": zod.array(zod.string()),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string(),
+  "annotationCount": zod.number(),
+  "noteCount": zod.number(),
+  "readyForGallery": zod.boolean().optional()
 })
 
 
@@ -174,6 +205,7 @@ export const ListAnnotationsResponseItem = zod.object({
   "y": zod.number().optional(),
   "text": zod.string().optional()
 })).optional(),
+  "imageData": zod.string().nullish(),
   "authorId": zod.string(),
   "authorName": zod.string(),
   "createdAt": zod.string()
@@ -202,7 +234,8 @@ export const CreateAnnotationBody = zod.object({
   "x": zod.number().optional(),
   "y": zod.number().optional(),
   "text": zod.string().optional()
-})).optional()
+})).optional(),
+  "imageData": zod.string().optional()
 })
 
 
@@ -239,6 +272,7 @@ export const ListNotesResponseItem = zod.object({
   "y": zod.number().optional(),
   "text": zod.string().optional()
 })).optional(),
+  "imageData": zod.string().nullish(),
   "authorId": zod.string(),
   "authorName": zod.string(),
   "createdAt": zod.string()
@@ -309,21 +343,26 @@ export const GetPinboardResponse = zod.object({
   "workspace": zod.string(),
   "cards": zod.array(zod.object({
   "id": zod.string(),
-  "type": zod.enum(['post', 'stickyNote']),
+  "type": zod.enum(['post', 'annotationNode']),
   "postId": zod.string().nullish(),
+  "parentCardId": zod.string().nullish(),
+  "annotationId": zod.string().nullish(),
   "title": zod.string().optional(),
   "authorName": zod.string().nullish(),
   "status": zod.string().nullish(),
   "category": zod.string().nullish(),
   "tags": zod.array(zod.string()).optional(),
   "noteText": zod.string().nullish(),
+  "annotationType": zod.string().nullish(),
+  "annotationPreview": zod.string().nullish(),
   "x": zod.number().optional(),
   "y": zod.number().optional(),
   "groupId": zod.string().nullish()
 })),
   "connections": zod.array(zod.object({
   "from": zod.string(),
-  "to": zod.string()
+  "to": zod.string(),
+  "system": zod.boolean().optional()
 })),
   "updatedAt": zod.string()
 })
@@ -339,21 +378,26 @@ export const SavePinboardParams = zod.object({
 export const SavePinboardBody = zod.object({
   "cards": zod.array(zod.object({
   "id": zod.string(),
-  "type": zod.enum(['post', 'stickyNote']),
+  "type": zod.enum(['post', 'annotationNode']),
   "postId": zod.string().nullish(),
+  "parentCardId": zod.string().nullish(),
+  "annotationId": zod.string().nullish(),
   "title": zod.string().optional(),
   "authorName": zod.string().nullish(),
   "status": zod.string().nullish(),
   "category": zod.string().nullish(),
   "tags": zod.array(zod.string()).optional(),
   "noteText": zod.string().nullish(),
+  "annotationType": zod.string().nullish(),
+  "annotationPreview": zod.string().nullish(),
   "x": zod.number().optional(),
   "y": zod.number().optional(),
   "groupId": zod.string().nullish()
 })).optional(),
   "connections": zod.array(zod.object({
   "from": zod.string(),
-  "to": zod.string()
+  "to": zod.string(),
+  "system": zod.boolean().optional()
 })).optional()
 })
 
@@ -361,21 +405,26 @@ export const SavePinboardResponse = zod.object({
   "workspace": zod.string(),
   "cards": zod.array(zod.object({
   "id": zod.string(),
-  "type": zod.enum(['post', 'stickyNote']),
+  "type": zod.enum(['post', 'annotationNode']),
   "postId": zod.string().nullish(),
+  "parentCardId": zod.string().nullish(),
+  "annotationId": zod.string().nullish(),
   "title": zod.string().optional(),
   "authorName": zod.string().nullish(),
   "status": zod.string().nullish(),
   "category": zod.string().nullish(),
   "tags": zod.array(zod.string()).optional(),
   "noteText": zod.string().nullish(),
+  "annotationType": zod.string().nullish(),
+  "annotationPreview": zod.string().nullish(),
   "x": zod.number().optional(),
   "y": zod.number().optional(),
   "groupId": zod.string().nullish()
 })),
   "connections": zod.array(zod.object({
   "from": zod.string(),
-  "to": zod.string()
+  "to": zod.string(),
+  "system": zod.boolean().optional()
 })),
   "updatedAt": zod.string()
 })

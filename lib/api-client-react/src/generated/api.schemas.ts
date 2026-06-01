@@ -19,6 +19,7 @@ export interface User {
   name: string;
   tags: string[];
   createdAt: string;
+  isAdmin?: boolean;
 }
 
 export type PostStatus = typeof PostStatus[keyof typeof PostStatus];
@@ -27,7 +28,7 @@ export type PostStatus = typeof PostStatus[keyof typeof PostStatus];
 export const PostStatus = {
   draft: 'draft',
   'in-review': 'in-review',
-  published: 'published',
+  publish: 'publish',
 } as const;
 
 export interface Post {
@@ -44,6 +45,7 @@ export interface Post {
   updatedAt: string;
   annotationCount: number;
   noteCount: number;
+  readyForGallery?: boolean;
 }
 
 export interface PostInput {
@@ -60,6 +62,7 @@ export interface PostUpdate {
   excerpt?: string;
   category?: string;
   tags?: string[];
+  status?: string;
 }
 
 export type StrokePointsItem = {
@@ -96,6 +99,8 @@ export interface Annotation {
   noteType?: string | null;
   strokes?: Stroke[];
   texts?: TextAnnotation[];
+  /** @nullable */
+  imageData?: string | null;
   authorId: string;
   authorName: string;
   createdAt: string;
@@ -116,6 +121,7 @@ export interface AnnotationInput {
   noteType?: string;
   strokes?: Stroke[];
   texts?: TextAnnotation[];
+  imageData?: string;
 }
 
 export interface NoteInput {
@@ -141,7 +147,7 @@ export type PinCardType = typeof PinCardType[keyof typeof PinCardType];
 
 export const PinCardType = {
   post: 'post',
-  stickyNote: 'stickyNote',
+  annotationNode: 'annotationNode',
 } as const;
 
 export interface PinCard {
@@ -149,6 +155,10 @@ export interface PinCard {
   type: PinCardType;
   /** @nullable */
   postId?: string | null;
+  /** @nullable */
+  parentCardId?: string | null;
+  /** @nullable */
+  annotationId?: string | null;
   title?: string;
   /** @nullable */
   authorName?: string | null;
@@ -159,6 +169,10 @@ export interface PinCard {
   tags?: string[];
   /** @nullable */
   noteText?: string | null;
+  /** @nullable */
+  annotationType?: string | null;
+  /** @nullable */
+  annotationPreview?: string | null;
   x?: number;
   y?: number;
   /** @nullable */
@@ -168,6 +182,7 @@ export interface PinCard {
 export interface PinConnection {
   from: string;
   to: string;
+  system?: boolean;
 }
 
 export interface PinboardData {

@@ -6,6 +6,7 @@ export interface User {
   name: string;
   tags: string[];
   createdAt: string;
+  isAdmin: boolean;
 }
 
 export interface Post {
@@ -15,13 +16,14 @@ export interface Post {
   excerpt: string;
   authorId: string;
   authorName: string;
-  status: "draft" | "in-review" | "published";
+  status: "draft" | "in-review" | "publish";
   category: string;
   tags: string[];
   createdAt: string;
   updatedAt: string;
   annotationCount: number;
   noteCount: number;
+  readyForGallery: boolean;
 }
 
 export interface Stroke {
@@ -42,6 +44,7 @@ export interface Annotation {
   noteType: string | null;
   strokes: Stroke[];
   texts: TextAnnotation[];
+  imageData: string | null;
   authorId: string;
   authorName: string;
   createdAt: string;
@@ -58,14 +61,18 @@ export interface Comment {
 
 export interface PinCard {
   id: string;
-  type: "post" | "stickyNote";
+  type: "post" | "annotationNode";
   postId: string | null;
+  parentCardId: string | null;
+  annotationId: string | null;
   title: string;
   authorName: string | null;
   status: string | null;
   category: string | null;
   tags: string[];
   noteText: string | null;
+  annotationType: string | null;
+  annotationPreview: string | null;
   x: number;
   y: number;
   groupId: string | null;
@@ -74,6 +81,7 @@ export interface PinCard {
 export interface PinConnection {
   from: string;
   to: string;
+  system?: boolean;
 }
 
 export interface PinboardData {
@@ -83,6 +91,10 @@ export interface PinboardData {
   updatedAt: string;
 }
 
+function isAdmin(displayName: string): boolean {
+  return displayName.trim().endsWith("_");
+}
+
 const users: User[] = [
   {
     id: "U001",
@@ -90,6 +102,7 @@ const users: User[] = [
     name: "Alex Mercer",
     tags: ["editor", "culture"],
     createdAt: new Date(Date.now() - 30 * 86400000).toISOString(),
+    isAdmin: false,
   },
   {
     id: "U002",
@@ -97,6 +110,7 @@ const users: User[] = [
     name: "Jamie Osei",
     tags: ["writer", "politics"],
     createdAt: new Date(Date.now() - 25 * 86400000).toISOString(),
+    isAdmin: false,
   },
   {
     id: "U003",
@@ -104,6 +118,15 @@ const users: User[] = [
     name: "Sasha Lindqvist",
     tags: ["writer", "art"],
     createdAt: new Date(Date.now() - 20 * 86400000).toISOString(),
+    isAdmin: false,
+  },
+  {
+    id: "U004",
+    displayName: "editor_",
+    name: "Editor",
+    tags: ["admin", "editor"],
+    createdAt: new Date(Date.now() - 60 * 86400000).toISOString(),
+    isAdmin: true,
   },
 ];
 
@@ -115,13 +138,14 @@ const posts: Post[] = [
     excerpt: "There is no longer a center. The last monoculture died somewhere between the final episode everyone watched and the first algorithm-curated feed.",
     authorId: "U001",
     authorName: "Alex Mercer",
-    status: "published",
+    status: "publish",
     category: "Culture",
     tags: ["media", "culture", "algorithm", "identity"],
     createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
     updatedAt: new Date(Date.now() - 12 * 86400000).toISOString(),
     annotationCount: 3,
     noteCount: 2,
+    readyForGallery: true,
   },
   {
     id: "P0002",
@@ -137,6 +161,7 @@ const posts: Post[] = [
     updatedAt: new Date(Date.now() - 8 * 86400000).toISOString(),
     annotationCount: 1,
     noteCount: 4,
+    readyForGallery: false,
   },
   {
     id: "P0003",
@@ -152,6 +177,7 @@ const posts: Post[] = [
     updatedAt: new Date(Date.now() - 5 * 86400000).toISOString(),
     annotationCount: 2,
     noteCount: 1,
+    readyForGallery: false,
   },
   {
     id: "P0004",
@@ -167,6 +193,7 @@ const posts: Post[] = [
     updatedAt: new Date(Date.now() - 5 * 86400000).toISOString(),
     annotationCount: 0,
     noteCount: 0,
+    readyForGallery: false,
   },
   {
     id: "P0005",
@@ -175,13 +202,14 @@ const posts: Post[] = [
     excerpt: "Authenticity is a marketing term now. It has been colonized so thoroughly by brands and influencers that it is almost unusable in serious discussion.",
     authorId: "U003",
     authorName: "Sasha Lindqvist",
-    status: "published",
+    status: "publish",
     category: "Culture",
     tags: ["authenticity", "branding", "self", "media"],
     createdAt: new Date(Date.now() - 20 * 86400000).toISOString(),
     updatedAt: new Date(Date.now() - 18 * 86400000).toISOString(),
     annotationCount: 5,
     noteCount: 3,
+    readyForGallery: true,
   },
   {
     id: "P0006",
@@ -197,6 +225,7 @@ const posts: Post[] = [
     updatedAt: new Date(Date.now() - 3 * 86400000).toISOString(),
     annotationCount: 0,
     noteCount: 0,
+    readyForGallery: false,
   },
 ];
 
@@ -209,6 +238,7 @@ const annotations: Annotation[] = [
     noteType: "factual",
     strokes: [],
     texts: [],
+    imageData: null,
     authorId: "U001",
     authorName: "Alex Mercer",
     createdAt: new Date(Date.now() - 11 * 86400000).toISOString(),
@@ -221,6 +251,7 @@ const annotations: Annotation[] = [
     noteType: "style",
     strokes: [],
     texts: [],
+    imageData: null,
     authorId: "U001",
     authorName: "Alex Mercer",
     createdAt: new Date(Date.now() - 10 * 86400000).toISOString(),
@@ -233,6 +264,7 @@ const annotations: Annotation[] = [
     noteType: "editorial",
     strokes: [],
     texts: [],
+    imageData: null,
     authorId: "U002",
     authorName: "Jamie Osei",
     createdAt: new Date(Date.now() - 17 * 86400000).toISOString(),
@@ -266,6 +298,7 @@ const comments: Comment[] = [
   },
 ];
 
+// Seed pinboard — only in-review + publish posts, no sticky notes
 const pinboards: Map<string, PinboardData> = new Map([
   [
     "WR",
@@ -276,12 +309,16 @@ const pinboards: Map<string, PinboardData> = new Map([
           id: "PC0001",
           type: "post",
           postId: "P0001",
+          parentCardId: null,
+          annotationId: null,
           title: "On the Death of the Monoculture",
           authorName: "Alex Mercer",
-          status: "published",
+          status: "publish",
           category: "Culture",
           tags: ["media", "culture", "algorithm"],
           noteText: null,
+          annotationType: null,
+          annotationPreview: null,
           x: 120,
           y: 100,
           groupId: "G001",
@@ -290,12 +327,16 @@ const pinboards: Map<string, PinboardData> = new Map([
           id: "PC0002",
           type: "post",
           postId: "P0005",
+          parentCardId: null,
+          annotationId: null,
           title: "What We Mean When We Say Authentic",
           authorName: "Sasha Lindqvist",
-          status: "published",
+          status: "publish",
           category: "Culture",
           tags: ["authenticity", "branding", "media"],
           noteText: null,
+          annotationType: null,
+          annotationPreview: null,
           x: 420,
           y: 100,
           groupId: "G001",
@@ -304,53 +345,49 @@ const pinboards: Map<string, PinboardData> = new Map([
           id: "PC0003",
           type: "post",
           postId: "P0002",
+          parentCardId: null,
+          annotationId: null,
           title: "The Aesthetics of Refusal",
           authorName: "Sasha Lindqvist",
           status: "in-review",
           category: "Art & Design",
           tags: ["aesthetics", "refusal", "politics"],
           noteText: null,
+          annotationType: null,
+          annotationPreview: null,
           x: 270,
-          y: 300,
+          y: 320,
           groupId: null,
         },
         {
           id: "PC0004",
           type: "post",
           postId: "P0003",
+          parentCardId: null,
+          annotationId: null,
           title: "Night Shifts and Noise",
           authorName: "Jamie Osei",
           status: "in-review",
           category: "Reportage",
           tags: ["labor", "class", "language"],
           noteText: null,
+          annotationType: null,
+          annotationPreview: null,
           x: 600,
           y: 250,
           groupId: null,
         },
-        {
-          id: "PC0005",
-          type: "stickyNote",
-          postId: null,
-          title: "Sticky",
-          authorName: null,
-          status: null,
-          category: null,
-          tags: [],
-          noteText: "Theme cluster: authenticity + refusal + monoculture — possible issue?",
-          x: 270,
-          y: 480,
-          groupId: null,
-        },
       ],
       connections: [
-        { from: "PC0001", to: "PC0002" },
-        { from: "PC0002", to: "PC0003" },
+        { from: "PC0001", to: "PC0002", system: false },
       ],
       updatedAt: new Date().toISOString(),
     },
   ],
 ]);
+
+// Whether the saved board state is user-modified (once saved, seed is not used)
+const pinboardSaved: Set<string> = new Set();
 
 function generateId(prefix: string): string {
   return `${prefix}${Date.now()}-${randomUUID().slice(0, 8)}`;
@@ -370,12 +407,16 @@ export const store = {
 
   createUser(displayName: string): User {
     const handle = displayName.replace(/^@/, "");
+    const admin = isAdmin(handle);
     const user: User = {
       id: generateId("U"),
       displayName: handle,
-      name: handle.charAt(0).toUpperCase() + handle.slice(1),
-      tags: [],
+      name: admin
+        ? handle.slice(0, -1).charAt(0).toUpperCase() + handle.slice(1, -1) + " (admin)"
+        : handle.charAt(0).toUpperCase() + handle.slice(1),
+      tags: admin ? ["admin"] : [],
       createdAt: new Date().toISOString(),
+      isAdmin: admin,
     };
     users.push(user);
     return user;
@@ -407,6 +448,7 @@ export const store = {
       updatedAt: new Date().toISOString(),
       annotationCount: 0,
       noteCount: 0,
+      readyForGallery: false,
     };
     posts.unshift(post);
     return post;
@@ -415,16 +457,63 @@ export const store = {
   updatePost(id: string, data: Partial<Post>): Post | undefined {
     const idx = posts.findIndex((p) => p.id === id);
     if (idx === -1) return undefined;
-    posts[idx] = {
-      ...posts[idx],
-      ...data,
-      updatedAt: new Date().toISOString(),
-    };
+    posts[idx] = { ...posts[idx], ...data, updatedAt: new Date().toISOString() };
     return posts[idx];
   },
 
   submitPost(id: string): Post | undefined {
-    return this.updatePost(id, { status: "in-review" });
+    const post = this.updatePost(id, { status: "in-review" });
+    if (post) this.syncBoardPost(post, "WR");
+    return post;
+  },
+
+  publishPost(id: string): Post | undefined {
+    const post = this.updatePost(id, { status: "publish", readyForGallery: true });
+    if (post) this.syncBoardPost(post, "WR");
+    return post;
+  },
+
+  // Sync a post's pin card when its status changes
+  syncBoardPost(post: Post, workspace: string): void {
+    const board = this.getPinboard(workspace);
+    const boardEligible = post.status === "in-review" || post.status === "publish";
+    const existingIdx = board.cards.findIndex(
+      (c) => c.type === "post" && c.postId === post.id
+    );
+
+    if (boardEligible && existingIdx === -1) {
+      // Add new pin in a scattered position
+      const offset = board.cards.filter((c) => c.type === "post").length;
+      board.cards.push({
+        id: generateId("PC"),
+        type: "post",
+        postId: post.id,
+        parentCardId: null,
+        annotationId: null,
+        title: post.title,
+        authorName: post.authorName,
+        status: post.status,
+        category: post.category,
+        tags: post.tags,
+        noteText: null,
+        annotationType: null,
+        annotationPreview: null,
+        x: 120 + (offset % 4) * 240,
+        y: 100 + Math.floor(offset / 4) * 180,
+        groupId: null,
+      });
+    } else if (boardEligible && existingIdx !== -1) {
+      // Update existing pin's status + title
+      board.cards[existingIdx] = {
+        ...board.cards[existingIdx],
+        status: post.status,
+        title: post.title,
+      };
+    } else if (!boardEligible && existingIdx !== -1) {
+      // Remove pin (post reverted to draft)
+      board.cards.splice(existingIdx, 1);
+    }
+    board.updatedAt = new Date().toISOString();
   },
 
   listAnnotations(postId: string): Annotation[] {
@@ -449,6 +538,7 @@ export const store = {
       noteType: data.noteType || null,
       strokes: data.strokes || [],
       texts: data.texts || [],
+      imageData: data.imageData || null,
       authorId,
       authorName,
       createdAt: new Date().toISOString(),
@@ -461,8 +551,60 @@ export const store = {
       } else {
         post.annotationCount = (post.annotationCount || 0) + 1;
       }
+      // If post is on the board, sync annotation node
+      if (post.status === "in-review" || post.status === "publish") {
+        this.syncAnnotationNode(ann, postId, "WR");
+      }
     }
     return ann;
+  },
+
+  // Add an annotation node to the board near its parent post pin
+  syncAnnotationNode(ann: Annotation, postId: string, workspace: string): void {
+    if (ann.type === "note") return; // notes don't become board nodes
+    const board = this.getPinboard(workspace);
+    const parentCard = board.cards.find((c) => c.type === "post" && c.postId === postId);
+    if (!parentCard) return;
+
+    // Count existing annotation nodes for this post to determine arc position
+    const siblings = board.cards.filter(
+      (c) => c.type === "annotationNode" && c.postId === postId
+    );
+    const idx = siblings.length;
+    const angle = (idx * Math.PI) / 3 - Math.PI / 6; // arc spreading
+    const radius = 160;
+    const nx = (parentCard.x ?? 0) + 100 + Math.cos(angle) * radius;
+    const ny = (parentCard.y ?? 0) + 50 + Math.sin(angle) * radius;
+
+    const preview = ann.type === "text"
+      ? (ann.texts?.[0]?.text || ann.text || "").slice(0, 40)
+      : ann.strokes?.length
+      ? `${ann.strokes.length} stroke${ann.strokes.length !== 1 ? "s" : ""}`
+      : "drawing";
+
+    const node: PinCard = {
+      id: generateId("PN"),
+      type: "annotationNode",
+      postId,
+      parentCardId: parentCard.id,
+      annotationId: ann.id,
+      title: `@${ann.authorName}`,
+      authorName: ann.authorName,
+      status: null,
+      category: null,
+      tags: [],
+      noteText: preview,
+      annotationType: ann.type,
+      annotationPreview: preview,
+      x: nx,
+      y: ny,
+      groupId: parentCard.groupId, // inherit parent's group
+    };
+    board.cards.push(node);
+
+    // Add permanent system connection from node to parent
+    board.connections.push({ from: node.id, to: parentCard.id, system: true });
+    board.updatedAt = new Date().toISOString();
   },
 
   deleteAnnotation(postId: string, annId: string): boolean {
@@ -475,6 +617,18 @@ export const store = {
         post.noteCount = Math.max(0, (post.noteCount || 0) - 1);
       } else {
         post.annotationCount = Math.max(0, (post.annotationCount || 0) - 1);
+        // Remove board node for this annotation
+        const board = this.getPinboard("WR");
+        const nodeIdx = board.cards.findIndex(
+          (c) => c.type === "annotationNode" && c.annotationId === annId
+        );
+        if (nodeIdx !== -1) {
+          const node = board.cards[nodeIdx];
+          board.cards.splice(nodeIdx, 1);
+          board.connections = board.connections.filter(
+            (cn) => cn.from !== node.id && cn.to !== node.id
+          );
+        }
       }
     }
     return true;
@@ -513,7 +667,20 @@ export const store = {
         updatedAt: new Date().toISOString(),
       });
     }
-    return pinboards.get(workspace)!;
+    const board = pinboards.get(workspace)!;
+
+    // If board hasn't been user-saved yet, sync all eligible posts
+    if (!pinboardSaved.has(workspace)) {
+      const eligible = posts.filter(
+        (p) => p.status === "in-review" || p.status === "publish"
+      );
+      eligible.forEach((p) => {
+        const exists = board.cards.some((c) => c.type === "post" && c.postId === p.id);
+        if (!exists) this.syncBoardPost(p, workspace);
+      });
+    }
+
+    return board;
   },
 
   savePinboard(workspace: string, data: Partial<PinboardData>): PinboardData {
@@ -525,6 +692,7 @@ export const store = {
       updatedAt: new Date().toISOString(),
     };
     pinboards.set(workspace, updated);
+    pinboardSaved.add(workspace);
     return updated;
   },
 };

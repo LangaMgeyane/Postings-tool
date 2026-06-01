@@ -11,5 +11,5 @@ export type PinCardType = typeof PinCardType[keyof typeof PinCardType];
 
 export const PinCardType = {
   post: 'post',
-  stickyNote: 'stickyNote',
+  annotationNode: 'annotationNode',
 } as const;

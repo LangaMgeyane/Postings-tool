@@ -12,4 +12,5 @@ export interface User {
   name: string;
   tags: string[];
   createdAt: string;
+  isAdmin?: boolean;
 }

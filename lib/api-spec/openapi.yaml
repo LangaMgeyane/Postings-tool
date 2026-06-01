@@ -40,7 +40,7 @@ paths:
     post:
       operationId: login
       tags: [auth]
-      summary: Login via Slack handle
+      summary: Login
       requestBody:
         required: true
         content:
@@ -142,7 +142,7 @@ paths:
     post:
       operationId: submitPost
       tags: [posts]
-      summary: Submit post for review
+      summary: Submit post for review (draft → in-review)
       parameters:
         - in: path
           name: postId
@@ -152,6 +152,25 @@ paths:
       responses:
         "200":
           description: Submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+
+  /postings/posts/{postId}/publish:
+    post:
+      operationId: publishPost
+      tags: [posts]
+      summary: Publish post (in-review → publish, admin only)
+      parameters:
+        - in: path
+          name: postId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Published
           content:
             application/json:
               schema:
@@ -410,6 +429,8 @@ components:
             type: string
         createdAt:
           type: string
+        isAdmin:
+          type: boolean
 
     Post:
       type: object
@@ -442,7 +463,7 @@ components:
           type: string
         status:
           type: string
-          enum: [draft, in-review, published]
+          enum: [draft, in-review, publish]
         category:
           type: string
         tags:
@@ -457,6 +478,8 @@ components:
           type: integer
         noteCount:
           type: integer
+        readyForGallery:
+          type: boolean
 
     PostInput:
       type: object
@@ -489,6 +512,8 @@ components:
           type: array
           items:
             type: string
+        status:
+          type: string
 
     Stroke:
       type: object
@@ -542,6 +567,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TextAnnotation"
+        imageData:
+          type: ["string", "null"]
         authorId:
           type: string
         authorName:
@@ -569,6 +596,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TextAnnotation"
+        imageData:
+          type: string
 
     NoteInput:
       type: object
@@ -621,8 +650,12 @@ components:
           type: string
         type:
           type: string
-          enum: [post, stickyNote]
+          enum: [post, annotationNode]
         postId:
+          type: ["string", "null"]
+        parentCardId:
+          type: ["string", "null"]
+        annotationId:
           type: ["string", "null"]
         title:
           type: string
@@ -637,6 +670,10 @@ components:
           items:
             type: string
         noteText:
+          type: ["string", "null"]
+        annotationType:
+          type: ["string", "null"]
+        annotationPreview:
           type: ["string", "null"]
         x:
           type: number
@@ -655,6 +692,8 @@ components:
           type: string
         to:
           type: string
+        system:
+          type: boolean
 
     PinboardData:
       type: object

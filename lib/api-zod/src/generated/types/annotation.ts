@@ -19,6 +19,8 @@ export interface Annotation {
   noteType?: string | null;
   strokes?: Stroke[];
   texts?: TextAnnotation[];
+  /** @nullable */
+  imageData?: string | null;
   authorId: string;
   authorName: string;
   createdAt: string;

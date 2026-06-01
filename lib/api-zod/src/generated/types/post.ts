@@ -21,4 +21,5 @@ export interface Post {
   updatedAt: string;
   annotationCount: number;
   noteCount: number;
+  readyForGallery?: boolean;
 }

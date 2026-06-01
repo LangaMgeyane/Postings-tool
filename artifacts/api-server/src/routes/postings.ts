@@ -14,7 +14,9 @@ router.post("/auth/login", (req, res) => {
   if (!user) {
     user = store.createUser(displayName);
   }
-  res.json(user);
+  // Always recompute isAdmin from displayName (trailing underscore)
+  const isAdmin = displayName.trim().endsWith("_");
+  res.json({ ...user, isAdmin });
 });
 
 // Posts
@@ -51,6 +53,7 @@ router.patch("/posts/:postId", (req, res) => {
   res.json(post);
 });
 
+// Submit: draft → in-review
 router.post("/posts/:postId/submit", (req, res) => {
   const post = store.submitPost(req.params.postId);
   if (!post) {
@@ -58,6 +61,21 @@ router.post("/posts/:postId/submit", (req, res) => {
     return;
   }
   res.json(post);
+});
+
+// Publish: in-review → publish (admin only — caller must verify isAdmin)
+router.post("/posts/:postId/publish", (req, res) => {
+  const post = store.findPost(req.params.postId);
+  if (!post) {
+    res.status(404).json({ error: "Post not found" });
+    return;
+  }
+  if (post.status !== "in-review") {
+    res.status(400).json({ error: "Post must be in-review to publish" });
+    return;
+  }
+  const published = store.publishPost(req.params.postId);
+  res.json(published);
 });
 
 // Annotations

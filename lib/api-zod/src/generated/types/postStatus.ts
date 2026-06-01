@@ -12,5 +12,5 @@ export type PostStatus = typeof PostStatus[keyof typeof PostStatus];
 export const PostStatus = {
   draft: 'draft',
   'in-review': 'in-review',
-  published: 'published',
+  publish: 'publish',
 } as const;

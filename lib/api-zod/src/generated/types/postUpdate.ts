@@ -12,4 +12,5 @@ export interface PostUpdate {
   excerpt?: string;
   category?: string;
   tags?: string[];
+  status?: string;
 }

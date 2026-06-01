@@ -9,4 +9,5 @@
 export interface PinConnection {
   from: string;
   to: string;
+  system?: boolean;
 }

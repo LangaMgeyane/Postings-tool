@@ -58,7 +58,7 @@ export function ANBPanel({ onClose }: ANBPanelProps) {
   );
 }
 
-// ── Notes tab ─────────────────────────────────────────────────────────────────
+// ── Notes tab ──────────────────────────────────────────────────────────────────
 
 function NotesTab({ postId }: { postId?: string }) {
   const session = getSession();
@@ -90,7 +90,6 @@ function NotesTab({ postId }: { postId?: string }) {
       {annotations.map(ann => (
         <div key={ann.id} className="relative group p-3 bg-surface/40 border border-border/30 rounded text-xs">
           <div className="flex items-start gap-2 mb-1.5">
-            {/* Tack icon — click to preview */}
             <button
               className="mt-0.5 text-primary/50 hover:text-primary transition-colors shrink-0 p-0.5 rounded min-w-[20px] min-h-[20px] flex items-center justify-center"
               onClick={() => setPreviewAnn(previewAnn?.id === ann.id ? null : ann)}
@@ -126,7 +125,6 @@ function NotesTab({ postId }: { postId?: string }) {
             )}
           </div>
 
-          {/* Annotation preview popover */}
           {previewAnn?.id === ann.id && (
             <AnnotationPreview ann={ann} onClose={() => setPreviewAnn(null)} />
           )}
@@ -147,24 +145,37 @@ function AnnotationPreview({ ann, onClose }: { ann: Annotation; onClose: () => v
     if (!ctx) return;
     const w = canvas.width, h = canvas.height;
     ctx.clearRect(0, 0, w, h);
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1.5;
-    ctx.lineCap = 'round';
-    ctx.shadowBlur = 4;
-    ctx.shadowColor = 'rgba(255,255,255,0.6)';
-    (ann.strokes || []).forEach((s: any) => {
-      const pts = s.points || [];
-      if (pts.length < 2) return;
-      ctx.beginPath();
-      ctx.moveTo((pts[0].x ?? 0) * w, (pts[0].y ?? 0) * h);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo((pts[i].x ?? 0) * w, (pts[i].y ?? 0) * h);
-      ctx.stroke();
-    });
-    (ann.texts || []).forEach((t: any) => {
-      ctx.fillStyle = '#E55A1B';
-      ctx.font = '12px "DM Sans", sans-serif';
-      ctx.fillText(t.text || '', (t.x ?? 0) * w, (t.y ?? 0) * h);
-    });
+
+    const draw = () => {
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.lineCap = 'round';
+      ctx.shadowBlur = 4;
+      ctx.shadowColor = 'rgba(255,255,255,0.6)';
+      (ann.strokes || []).forEach((s: any) => {
+        const pts = s.points || [];
+        if (pts.length < 2) return;
+        ctx.beginPath();
+        ctx.moveTo((pts[0].x ?? 0) * w, (pts[0].y ?? 0) * h);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo((pts[i].x ?? 0) * w, (pts[i].y ?? 0) * h);
+        ctx.stroke();
+      });
+      ctx.shadowBlur = 0;
+      (ann.texts || []).forEach((t: any) => {
+        ctx.fillStyle = '#E55A1B';
+        ctx.font = '12px "DM Sans", sans-serif';
+        ctx.fillText(t.text || '', (t.x ?? 0) * w, (t.y ?? 0) * h);
+      });
+    };
+
+    const imgData = (ann as any).imageData;
+    if (imgData) {
+      const img = new Image();
+      img.onload = () => { ctx.drawImage(img, 0, 0, w, h); draw(); };
+      img.src = imgData;
+    } else {
+      draw();
+    }
   }, [ann]);
 
   if (ann.type === 'note' || (ann.type === 'text' && !ann.strokes?.length)) {
@@ -188,7 +199,7 @@ function AnnotationPreview({ ann, onClose }: { ann: Annotation; onClose: () => v
   );
 }
 
-// ── Comments tab ──────────────────────────────────────────────────────────────
+// ── Comments tab ───────────────────────────────────────────────────────────────
 
 function CommentsTab({ postId }: { postId?: string }) {
   const session = getSession();
@@ -275,30 +286,47 @@ function CommentsTab({ postId }: { postId?: string }) {
   );
 }
 
-// ── Board tab ─────────────────────────────────────────────────────────────────
+// ── Board tab ──────────────────────────────────────────────────────────────────
 
 function BoardTab({ postId }: { postId?: string }) {
   const [, setLocation] = useLocation();
   const { data: board } = useGetPinboard('WR');
 
   const currentCard = postId && board?.cards
-    ? board.cards.find(c => c.postId === postId) ?? null
+    ? board.cards.find(c => c.type === 'post' && c.postId === postId) ?? null
     : null;
 
-  const groupCards = currentCard?.groupId && board?.cards
-    ? board.cards.filter(c => c.groupId === currentCard.groupId)
+  // All cards in the same group, plus annotation nodes linked to current card
+  const contextCards = currentCard && board?.cards
+    ? board.cards.filter(c => {
+        if (c.id === currentCard.id) return true;
+        if (currentCard.groupId && c.groupId === currentCard.groupId) return true;
+        // Include annotation nodes for this post
+        if (c.type === 'annotationNode' && c.postId === postId) return true;
+        // Include any cards linked to current card
+        if (board.connections?.some(cn =>
+          (cn.from === currentCard.id && cn.to === c.id) ||
+          (cn.to === currentCard.id && cn.from === c.id)
+        )) return true;
+        return false;
+      })
     : currentCard ? [currentCard] : [];
 
-  const groupConns = board?.connections?.filter(cn =>
-    groupCards.some(c => c.id === cn.from) && groupCards.some(c => c.id === cn.to)
+  const contextConns = board?.connections?.filter(cn =>
+    contextCards.some(c => c.id === cn.from) && contextCards.some(c => c.id === cn.to)
   ) ?? [];
 
   if (!postId) {
     return (
       <div className="p-3 h-full flex flex-col">
         <EmptyState message="Select a post to see board context" />
-        <Button variant="outline" size="sm" className="w-full h-8 text-xs border-border/40 text-muted-foreground hover:text-foreground mt-auto mx-3 mb-3 w-[calc(100%-1.5rem)]"
-          onClick={() => setLocation('/writers-room?subspace=c3')}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full h-8 text-xs border-border/40 text-muted-foreground hover:text-foreground mt-auto mx-3 mb-3"
+          style={{ width: 'calc(100% - 1.5rem)' }}
+          onClick={() => setLocation('/writers-room?subspace=c3')}
+        >
           Open Board <ArrowRight className="w-3 h-3 ml-2" />
         </Button>
       </div>
@@ -309,7 +337,7 @@ function BoardTab({ postId }: { postId?: string }) {
     <div className="p-3 h-full flex flex-col gap-3">
       <div className="flex-1 bg-surface/30 border border-border/25 rounded overflow-hidden relative min-h-[120px]">
         {currentCard
-          ? <BoardMiniCanvas cards={groupCards} connections={groupConns} focusedCard={currentCard} />
+          ? <BoardMiniCanvas cards={contextCards} connections={contextConns} focusedCard={currentCard} />
           : <EmptyState message="This post has no pin on the board yet" />
         }
       </div>
@@ -319,7 +347,7 @@ function BoardTab({ postId }: { postId?: string }) {
         className="w-full h-8 text-xs border-border/40 text-muted-foreground hover:text-foreground shrink-0"
         onClick={() => setLocation('/writers-room?subspace=c3')}
       >
-        {currentCard ? 'Center on this pin' : 'Open Board'}
+        {currentCard ? 'Open Board' : 'Open Board'}
         <ArrowRight className="w-3 h-3 ml-2" />
       </Button>
     </div>
@@ -328,7 +356,7 @@ function BoardTab({ postId }: { postId?: string }) {
 
 function BoardMiniCanvas({ cards, connections, focusedCard }: {
   cards: PinCard[];
-  connections: { from: string; to: string }[];
+  connections: { from: string; to: string; system?: boolean }[];
   focusedCard: PinCard;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -353,18 +381,23 @@ function BoardMiniCanvas({ cards, connections, focusedCard }: {
 
     if (cards.length === 0) return;
 
-    const CARD_W = 160, CARD_H = 80;
-    const STICKY_W = 120, STICKY_H = 100;
+    const CARD_W = 150, CARD_H = 75;
+    const NODE_W = 90, NODE_H = 52;
 
-    function cw2(c: PinCard) { return c.type === 'stickyNote' ? STICKY_W : CARD_W; }
-    function ch2(c: PinCard) { return c.type === 'stickyNote' ? STICKY_H : CARD_H; }
+    function cdims(c: PinCard) { return c.type === 'annotationNode' ? { w: NODE_W, h: NODE_H } : { w: CARD_W, h: CARD_H }; }
     function scX(c: PinCard) { return c.x ?? 0; }
     function scY(c: PinCard) { return c.y ?? 0; }
 
-    // Compute bounds of all group cards
+    function statusColor2(s: string | null) {
+      if (s === 'publish') return '#22c55e';
+      if (s === 'in-review') return '#f59e0b';
+      return '#64748b';
+    }
+
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     cards.forEach(c => {
-      const x = scX(c), y = scY(c), w = cw2(c), h = ch2(c);
+      const { w, h } = cdims(c);
+      const x = scX(c), y = scY(c);
       minX = Math.min(minX, x); minY = Math.min(minY, y);
       maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
     });
@@ -377,37 +410,46 @@ function BoardMiniCanvas({ cards, connections, focusedCard }: {
     const oy = (ch - bh * scale) / 2 - (minY - PAD) * scale;
 
     // Connections
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.lineWidth = 1;
     connections.forEach(conn => {
       const from = cards.find(c => c.id === conn.from);
       const to = cards.find(c => c.id === conn.to);
       if (!from || !to) return;
-      const fx = scX(from) * scale + ox + cw2(from) * scale / 2;
-      const fy = scY(from) * scale + oy + ch2(from) * scale / 2;
-      const tx = scX(to) * scale + ox + cw2(to) * scale / 2;
-      const ty = scY(to) * scale + oy + ch2(to) * scale / 2;
+      const { w: fw, h: fh } = cdims(from);
+      const { w: tw, h: th } = cdims(to);
+      const fx = scX(from) * scale + ox + fw * scale / 2;
+      const fy = scY(from) * scale + oy + fh * scale / 2;
+      const tx = scX(to) * scale + ox + tw * scale / 2;
+      const ty = scY(to) * scale + oy + th * scale / 2;
+
+      ctx.strokeStyle = (conn as any).system ? 'rgba(129,140,248,0.2)' : 'rgba(255,255,255,0.08)';
+      ctx.lineWidth = 1;
+      if ((conn as any).system) ctx.setLineDash([3, 3]);
       ctx.beginPath();
       ctx.moveTo(fx, fy);
       ctx.bezierCurveTo(fx + (tx - fx) * 0.5, fy, fx + (tx - fx) * 0.5, ty, tx, ty);
       ctx.stroke();
+      ctx.setLineDash([]);
     });
 
     // Cards
     cards.forEach(c => {
+      const { w, h } = cdims(c);
       const x = scX(c) * scale + ox;
       const y = scY(c) * scale + oy;
-      const w = cw2(c) * scale;
-      const h = ch2(c) * scale;
+      const sw = w * scale;
+      const sh = h * scale;
       const isFocused = c.id === focusedCard.id;
 
-      ctx.fillStyle = c.type === 'stickyNote' ? '#1e1700' : '#1a1a1a';
-      ctx.fillRect(x, y, w, h);
+      ctx.fillStyle = c.type === 'annotationNode' ? '#111118' : '#1a1a1a';
+      ctx.fillRect(x, y, sw, sh);
 
       if (c.type === 'post') {
-        const sc = c.status === 'published' ? '#22c55e' : c.status === 'in-review' ? '#f59e0b' : '#64748b';
+        const sc = statusColor2(c.status ?? null);
         ctx.fillStyle = sc;
-        ctx.fillRect(x, y, Math.max(2, 4 * scale), h);
+        ctx.fillRect(x, y, Math.max(2, 4 * scale), sh);
+      } else if (c.type === 'annotationNode') {
+        ctx.fillStyle = 'rgba(129,140,248,0.4)';
+        ctx.fillRect(x, y, sw, Math.max(1, 2 * scale));
       }
 
       if (isFocused) {
@@ -415,16 +457,17 @@ function BoardMiniCanvas({ cards, connections, focusedCard }: {
         ctx.lineWidth = 1.5;
         ctx.shadowColor = '#E55A1B60';
         ctx.shadowBlur = 6;
-        ctx.strokeRect(x - 1, y - 1, w + 2, h + 2);
+        ctx.strokeRect(x - 1, y - 1, sw + 2, sh + 2);
         ctx.shadowBlur = 0;
       }
 
-      // Title text at sufficient scale
       if (scale > 0.3) {
-        ctx.fillStyle = c.type === 'stickyNote' ? '#d97706' : '#e0deda';
-        ctx.font = `${Math.max(7, 11 * scale)}px "DM Sans", sans-serif`;
-        const title = (c.type === 'stickyNote' ? c.noteText : c.title) || '';
-        ctx.fillText(title.slice(0, 18), x + 6 * scale, y + 14 * scale);
+        ctx.fillStyle = c.type === 'annotationNode' ? 'rgba(255,255,255,0.5)' : '#e0deda';
+        ctx.font = `${Math.max(7, 10 * scale)}px "DM Sans", sans-serif`;
+        const title = c.type === 'annotationNode'
+          ? (c.annotationPreview || c.noteText || 'annotation')
+          : (c.title || '');
+        ctx.fillText(title.slice(0, 16), x + 5 * scale, y + 14 * scale);
       }
     });
   }, [cards, connections, focusedCard]);
@@ -438,7 +481,7 @@ function BoardMiniCanvas({ cards, connections, focusedCard }: {
   return <div ref={containerRef} className="absolute inset-0"><canvas ref={canvasRef} className="w-full h-full" /></div>;
 }
 
-// ── Shared helpers ────────────────────────────────────────────────────────────
+// ── Shared helpers ─────────────────────────────────────────────────────────────
 
 function EmptyState({ message }: { message: string }) {
   return (

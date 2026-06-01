@@ -22,10 +22,12 @@ export default function Login() {
 
     loginMutation.mutate({ data: { displayName: displayName.trim() } as any }, {
       onSuccess: (user) => {
+        const isAdmin = (user as any).isAdmin === true || displayName.trim().endsWith('_');
         setSession({
           userId: user.id,
           userName: user.name,
           userTags: user.tags || [],
+          isAdmin,
         });
         setLocation('/workspaces');
       },

@@ -12,6 +12,10 @@ export interface PinCard {
   type: PinCardType;
   /** @nullable */
   postId?: string | null;
+  /** @nullable */
+  parentCardId?: string | null;
+  /** @nullable */
+  annotationId?: string | null;
   title?: string;
   /** @nullable */
   authorName?: string | null;
@@ -22,6 +26,10 @@ export interface PinCard {
   tags?: string[];
   /** @nullable */
   noteText?: string | null;
+  /** @nullable */
+  annotationType?: string | null;
+  /** @nullable */
+  annotationPreview?: string | null;
   x?: number;
   y?: number;
   /** @nullable */

@@ -1,0 +1,329 @@
+# POSTINGS — UPDATE INSTRUCTIONS v3.4
+
+## Pinboard, Annotation, Status Workflow, Layout
+
+This is a surgical update. Do not rebuild anything that works.
+Read each section fully before touching the relevant area.
+No file references — work from what you have built.
+
+-----
+
+## 1. STATUS WORKFLOW — COMPLETE THE LOOP
+
+### The corrected status chain is:
+
+`draft` → `in review` → `publish`
+
+The final status is **publish**, not “published”. Rename this everywhere
+it appears — in the data model, UI labels, status pills, and API logic.
+
+-----
+
+### Authors can submit from My Journal
+
+In My Journal, when an author is viewing their own post (author/editor
+view), they must be able to move it from `draft` to `in review`.
+This already partially exists as a submit action. Confirm it works
+end-to-end: the post status updates on the server, the feed card
+updates its status pill, and the post is now visible on the Pin Board.
+
+When a post moves to `in review`, it must immediately appear on the
+Pin Board without requiring a page reload.
+
+-----
+
+### Admin accounts can set `in review` → `publish`
+
+An admin account is any account whose display name ends with an
+underscore. Examples: `langa_`, `editor_`, `scheme_`. This is checked
+at login time and stored in session state as a boolean flag
+(`isAdmin: true/false`).
+
+Admins, when viewing an `in review` post in the Main Journal expanded
+post view, see an additional action: a **Publish** button. Pressing it
+moves the post to `publish` status after a confirm step.
+
+Non-admin users never see this button. It does not exist in their UI.
+
+When a post is set to `publish`, it is flagged architecturally as
+ready for the Review Gallery. The Review Gallery is a future workspace —
+do not build it now. But the data must carry that flag so the connection
+can be made later without a data migration.
+
+-----
+
+## 2. PIN BOARD — LIVE DATA AND PERSISTENCE
+
+### Only `in review` and `publish` posts appear on the board
+
+Drafts do not appear. When a post’s status changes to `in review`,
+its pin is added to the board automatically. When a post is moved back
+(if ever) or deleted, its pin is removed. The board always reflects
+current post statuses — it does not need a manual refresh.
+
+-----
+
+### Board state must persist across navigation
+
+This is the core persistence bug. When the user edits the board
+(moves pins, creates groups, draws links) and then navigates away
+and returns, the board must load in exactly the state they left it.
+
+Save the full board state to the server whenever the user exits the
+board or exits edit mode. Load from that saved state on every board
+entry. The seed data is only used if no saved state exists yet.
+
+The in-memory server store is fine for now. The save/load interface
+must be clean enough that it can be swapped for a database call later
+without changing the frontend.
+
+-----
+
+## 3. ANNOTATION NODES — REPLACING STICKY NOTES ON THE BOARD
+
+### Sticky notes are no longer manually created on the Pin Board
+
+Remove the ability to create sticky notes directly on the Pin Board.
+The “+ Sticky” button and any associated creation flow is removed.
+
+-----
+
+### Annotation nodes are born in the Annotation Tool
+
+Everything a user creates in the Annotation Tool — drawings, text
+elements, and images — is saved as an annotation attached to its
+post. When that annotation is saved, a corresponding annotation node
+automatically appears on the Pin Board, attached to the post’s pin.
+
+Each saved annotation becomes one node. Multiple annotations on the
+same post produce multiple nodes. All of them are visible on the board.
+
+-----
+
+### How annotation nodes look and behave on the board
+
+Annotation nodes are visually smaller than post pins. They are not
+free-floating — they are always attached to their parent post’s pin
+by a permanent, non-removable connecting line. This line exists
+regardless of grouping. It cannot be deleted by the user.
+
+Each node is rendered as a compact thumbnail that hints at its content:
+
+- A drawing annotation shows a small dark canvas with the stroke paths
+- A text annotation shows the first line of text on a dark background
+- An image annotation shows a small crop of the reference image
+
+Each node is individually expandable. Clicking a node on the board
+opens a larger preview of its content — not the full annotation overlay,
+just a readable view of what it contains.
+
+When a post pin is part of a group, its annotation nodes are also
+part of that group’s enclosure. They expand within the group space.
+
+For layout when many nodes exist: arrange them in a compact arc or
+grid around their parent pin. They do not stack on top of each other.
+The layout algorithm should distribute them evenly in the space around
+the pin so they remain individually tappable. Do not worry about
+smart filtering of nodes yet — show all of them.
+
+-----
+
+## 4. ANNOTATION TOOL — UPDATES
+
+### The annotation workspace has a defined work area
+
+The annotation overlay currently covers the full post. Inside this
+overlay, introduce a visible work area — a bounded canvas region that
+the user can see and aim for. This is the zone that gets captured
+when the annotation is saved.
+
+The work area is visually indicated: a subtle border or slight
+brightness difference from the surrounding overlay. It does not
+need to be a hard box — it can be a soft vignette or a gentle
+highlight. The point is that the user knows where their annotation
+will be captured.
+
+The captured output (what gets saved and what appears as the node
+thumbnail on the board) is this work area, not the entire screen.
+
+-----
+
+### Text and vector elements are movable after placement
+
+Once a text element or a drawn stroke is placed on the annotation
+canvas, the user must be able to move it. They should not have to
+delete and recreate an element just because it was placed slightly
+off.
+
+In Draw mode, completed strokes can be selected by clicking on or
+near them and then dragged to a new position.
+
+In Text mode, placed text elements can be clicked and dragged to
+reposition them. Double-clicking a placed text element opens it for
+editing again.
+
+Moving an element is separate from drawing — introduce a Select mode
+or make the existing tools context-aware (e.g. in Draw mode, clicking
+on an existing stroke selects it rather than starting a new stroke).
+The toolbar toggle between Draw, Text, and a Select/Move state should
+be clear and simple.
+
+-----
+
+### Image support in the annotation tool
+
+A user can attach one reference image to an annotation. The image is
+placed as the base layer of the work area — it fills the work area
+behind the drawing and text elements.
+
+The image is added via drag-and-drop onto the work area, or via a
+dedicated image button in the annotation toolbar. Only one image per
+annotation. The image cannot be moved or resized once placed — it
+fills the work area entirely.
+
+Text and drawing elements are placed on top of the image as normal.
+
+When this annotation is saved, the captured output includes the image
+as the background with all drawings and text rendered over it.
+
+On the Pin Board, the node thumbnail for an image annotation shows
+the reference image as the background of the compact thumbnail.
+
+-----
+
+## 5. PIN BOARD — GROUPS AND LINKS SEPARATED
+
+### Grouping and linking are now two distinct actions
+
+Currently, grouping pins also creates connection lines between them.
+These must be separated into two independent systems.
+
+**Grouping** creates the bounding enclosure around selected pins.
+It organises them spatially and visually. It does not draw lines
+between the pins. A group is a container.
+
+**Linking** draws a connection line between two specific pins.
+Links are created manually in edit mode by dragging from one pin
+to another. The drag starts from a visible handle on the pin’s edge
+(a small dot or anchor point that appears when in edit mode and
+hovering a pin). Dragging from that handle to another pin creates
+a link. Links can exist between pins inside the same group, across
+groups, or between ungrouped pins.
+
+Links are directional or non-directional — for now, treat them as
+non-directional (simple lines, no arrows).
+
+Links between annotation nodes and their parent post pin are
+permanent and system-created. They cannot be deleted by the user.
+All other links are user-created and can be deleted in edit mode
+by selecting the link line and pressing Delete or using a remove action.
+
+-----
+
+### Group names are editable after creation
+
+Double-clicking the group name label on the board opens an inline
+text input. Enter commits. Escape cancels. This was in v3.3 and
+remains required.
+
+-----
+
+## 6. LAYOUT — TWO PANELS MAXIMUM AT ANY TIME
+
+This applies to both desktop and mobile. The three-panel simultaneous
+view is removed.
+
+### Feed view (no post selected)
+
+Only the feed panel is visible. It takes the dominant space.
+The ANB panel is not shown. The content panel is not shown.
+
+### Post selected
+
+The feed panel is hidden (slides away).
+The content panel and the ANB panel are visible together.
+The content panel takes the larger share of space.
+The ANB panel is on the right at a fixed width.
+
+### Pin Board
+
+The board fills the full available space.
+The ANB panel is not shown on the Pin Board at all.
+Remove it entirely from the Pin Board view.
+
+### Transitions
+
+All panel changes slide — no popping, no flashing.
+The transition when selecting a post (feed out, content + ANB in)
+and when going back (content + ANB out, feed in) must feel like
+one coordinated motion, not two separate events.
+
+-----
+
+## 7. ANB PANEL — CONTEXT AWARENESS
+
+### ANB does not appear on the Pin Board
+
+As stated above — remove the ANB entirely from the Pin Board view.
+It is a journal-only panel.
+
+### ANB Board tab shows a live preview of the current post’s board context
+
+When a post is open and the user views the Board tab in the ANB:
+
+- The preview is centered on the current post’s pin
+- It shows the post’s pin, all of its annotation nodes, and any pins
+  it is linked to or grouped with
+- If the post has no pin yet (still a draft somehow in view), show
+  an empty state
+- The preview updates to reflect the current board state — it is not
+  a cached screenshot. It is re-rendered each time the tab is opened.
+- It is not interactive — no dragging, no clicking pins
+- The “Expand” button navigates to the full Pin Board with this post’s
+  pin centered and selected
+
+-----
+
+## 8. FILTERING — MAKE IT ACCESSIBLE FIRST
+
+The filtering system on the Pin Board must be visible and openable.
+The filter panel or filter controls must render and be toggleable.
+
+Do not implement filter logic changes yet. The goal right now is:
+the user can open the filter UI, see the filter options, and the
+controls are present even if the filtering behaviour needs refinement
+later.
+
+If filters are currently hidden, broken, or non-functional as a UI
+element, fix the rendering so they appear. Logic quality control
+comes in the next update.
+
+-----
+
+## SUMMARY CHECKLIST
+
+|# |Area                                                       |Type  |
+|--|-----------------------------------------------------------|------|
+|1 |Rename `published` → `publish` everywhere                  |CHANGE|
+|2 |Author can submit draft → in review from My Journal        |FIX   |
+|3 |Admin accounts identified by trailing underscore           |ADD   |
+|4 |Admins can set in review → publish from Main Journal       |ADD   |
+|5 |Publish flag stored for future Review Gallery connection   |ADD   |
+|6 |Pin Board shows only in-review and publish posts, live     |FIX   |
+|7 |Pin Board state persists across navigation                 |FIX   |
+|8 |Remove manual sticky note creation from Pin Board          |REMOVE|
+|9 |Annotation saves create annotation nodes on the board      |ADD   |
+|10|Annotation nodes: thumbnail, permanent link to post pin    |ADD   |
+|11|Annotation nodes: individually expandable                  |ADD   |
+|12|Annotation nodes: arc/grid layout around parent pin        |ADD   |
+|13|Annotation tool: defined visible work area                 |ADD   |
+|14|Annotation tool: text and vector elements are movable      |FIX   |
+|15|Annotation tool: image support as base layer               |ADD   |
+|16|Pin Board: grouping and linking separated                  |CHANGE|
+|17|Pin Board: manual link creation by dragging from pin handle|ADD   |
+|18|Pin Board: user links deletable in edit mode               |ADD   |
+|19|Pin group names editable after creation                    |ADD   |
+|20|Two-panel max rule — desktop and mobile                    |CHANGE|
+|21|ANB removed from Pin Board view entirely                   |CHANGE|
+|22|ANB Board tab: live re-rendered preview of post context    |CHANGE|
+|23|Pin Board filter UI visible and openable                   |FIX   |

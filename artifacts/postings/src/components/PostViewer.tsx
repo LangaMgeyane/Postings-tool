@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { useGetPost, getGetPostQueryKey } from '@workspace/api-client-react';
+import { useGetPost, usePublishPost, getGetPostQueryKey, getListPostsQueryKey } from '@workspace/api-client-react';
 import { getSession } from '@/session';
 import { StatusPill } from './StatusPill';
 import { Button } from '@/components/ui/button';
 import { formatDistanceToNow } from 'date-fns';
 import { AnnotationOverlay } from './AnnotationOverlay';
 import { NoteModal } from './NoteModal';
-import { MessageSquarePlus, ArrowLeft } from 'lucide-react';
+import { MessageSquarePlus, ArrowLeft, BookOpen } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface PostViewerProps {
   onBack?: () => void;
@@ -17,9 +19,12 @@ interface PostViewerProps {
 export function PostViewer({ onBack, isAnnotating = false, onAnnotatingChange }: PostViewerProps) {
   const session = getSession();
   const [isAddingNote, setIsAddingNote] = useState(false);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const postId = session?.selectedPostId;
   const isMyJournal = session?.currentSubspace === 'c2';
+  const isAdmin = session?.isAdmin === true;
 
   const { data: post, isLoading } = useGetPost(postId || '', {
     query: {
@@ -28,9 +33,11 @@ export function PostViewer({ onBack, isAnnotating = false, onAnnotatingChange }:
     }
   });
 
+  const publishPost = usePublishPost();
+
   if (!postId) return null;
 
-  // My Journal authorship enforcement: don't show posts you don't own
+  // My Journal authorship enforcement
   if (isMyJournal && post && post.authorId !== session?.userId) return null;
 
   if (isLoading) {
@@ -38,6 +45,21 @@ export function PostViewer({ onBack, isAnnotating = false, onAnnotatingChange }:
   }
 
   if (!post) return null;
+
+  const canPublish = isAdmin && post.status === 'in-review';
+
+  const handlePublish = async () => {
+    const confirmed = window.confirm(`Publish "${post.title}"? It will be marked as ready for the Review Gallery.`);
+    if (!confirmed) return;
+    try {
+      await publishPost.mutateAsync({ postId: post.id });
+      queryClient.invalidateQueries({ queryKey: getGetPostQueryKey(post.id) });
+      queryClient.invalidateQueries({ queryKey: getListPostsQueryKey() });
+      toast({ title: 'Published', description: `"${post.title}" is now published.` });
+    } catch (e: any) {
+      toast({ title: 'Publish failed', description: e.message, variant: 'destructive' });
+    }
+  };
 
   return (
     <div className="h-full flex flex-col relative">
@@ -59,15 +81,28 @@ export function PostViewer({ onBack, isAnnotating = false, onAnnotatingChange }:
             </span>
           )}
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 text-xs text-muted-foreground hover:text-foreground min-w-[44px]"
-          onClick={() => setIsAddingNote(true)}
-        >
-          <MessageSquarePlus className="w-3.5 h-3.5 mr-1.5" />
-          Note
-        </Button>
+        <div className="flex items-center gap-2">
+          {canPublish && (
+            <Button
+              size="sm"
+              className="h-8 text-xs bg-green-600 hover:bg-green-500 text-white border-0"
+              onClick={handlePublish}
+              disabled={publishPost.isPending}
+            >
+              <BookOpen className="w-3 h-3 mr-1.5" />
+              Publish
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 text-xs text-muted-foreground hover:text-foreground min-w-[44px]"
+            onClick={() => setIsAddingNote(true)}
+          >
+            <MessageSquarePlus className="w-3.5 h-3.5 mr-1.5" />
+            Note
+          </Button>
+        </div>
       </div>
 
       {/* Content */}
@@ -105,7 +140,6 @@ export function PostViewer({ onBack, isAnnotating = false, onAnnotatingChange }:
         </div>
       </div>
 
-      {/* Annotation overlay — controlled by parent WritersRoom */}
       {isAnnotating && onAnnotatingChange && (
         <AnnotationOverlay post={post} onClose={() => onAnnotatingChange(false)} />
       )}

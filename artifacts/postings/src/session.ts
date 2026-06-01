@@ -7,6 +7,7 @@ export interface SessionState {
   selectedPostId: string;
   isAuthorOfSelected: boolean;
   sessionCode: string;
+  isAdmin: boolean;
 }
 
 export function getSession(): SessionState | null {

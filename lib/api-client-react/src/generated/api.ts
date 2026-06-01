@@ -134,7 +134,7 @@ export const getLoginUrl = () => {
 }
 
 /**
- * @summary Login via Slack handle
+ * @summary Login
  */
 export const login = async (loginInput: LoginInput, options?: RequestInit): Promise<User> => {
 
@@ -183,7 +183,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type LoginMutationError = ErrorType<unknown>
 
     /**
- * @summary Login via Slack handle
+ * @summary Login
  */
 export const useLogin = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof login>>, TError,{data: BodyType<LoginInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -509,7 +509,7 @@ export const getSubmitPostUrl = (postId: string,) => {
 }
 
 /**
- * @summary Submit post for review
+ * @summary Submit post for review (draft → in-review)
  */
 export const submitPost = async (postId: string, options?: RequestInit): Promise<Post> => {
 
@@ -557,7 +557,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SubmitPostMutationError = ErrorType<unknown>
 
     /**
- * @summary Submit post for review
+ * @summary Submit post for review (draft → in-review)
  */
 export const useSubmitPost = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitPost>>, TError,{postId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -568,6 +568,76 @@ export const useSubmitPost = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getSubmitPostMutationOptions(options));
+    }
+
+export const getPublishPostUrl = (postId: string,) => {
+
+
+
+
+  return `/api/postings/posts/${postId}/publish`
+}
+
+/**
+ * @summary Publish post (in-review → publish, admin only)
+ */
+export const publishPost = async (postId: string, options?: RequestInit): Promise<Post> => {
+
+  return customFetch<Post>(getPublishPostUrl(postId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getPublishPostMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof publishPost>>, TError,{postId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof publishPost>>, TError,{postId: string}, TContext> => {
+
+const mutationKey = ['publishPost'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof publishPost>>, {postId: string}> = (props) => {
+          const {postId} = props ?? {};
+
+          return  publishPost(postId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PublishPostMutationResult = NonNullable<Awaited<ReturnType<typeof publishPost>>>
+
+    export type PublishPostMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Publish post (in-review → publish, admin only)
+ */
+export const usePublishPost = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof publishPost>>, TError,{postId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof publishPost>>,
+        TError,
+        {postId: string},
+        TContext
+      > => {
+      return useMutation(getPublishPostMutationOptions(options));
     }
 
 export const getListAnnotationsUrl = (postId: string,) => {

@@ -28,13 +28,12 @@ export default function WritersRoom() {
   const activeSubspace = subspaceParam || session?.currentSubspace || 'c1';
   const selectedPostId = session?.selectedPostId || '';
 
-  // ── Guard: auth + workspace ─────────────────────────────────────────────────
   useEffect(() => {
     if (!session?.userId) setLocation('/login');
     else if (session.currentWorkspace !== 'WR') setLocation('/workspaces');
   }, [session, setLocation]);
 
-  // ── Subspace change → hard-reset active post ────────────────────────────────
+  // Subspace change → hard-reset active post
   useEffect(() => {
     const prev = prevSubspaceRef.current;
     if (prev !== null && prev !== activeSubspace) {
@@ -46,10 +45,9 @@ export default function WritersRoom() {
     prevSubspaceRef.current = activeSubspace;
   }, [activeSubspace, refresh]);
 
-  // ── My Journal: enforce authorship ──────────────────────────────────────────
+  // My Journal: enforce authorship
   useEffect(() => {
     if (activeSubspace === 'c2' && selectedPostId && session?.userId) {
-      // PostViewer enforces this via isMyJournal check; also clear in case of stale session
       const isAuthor = session.isAuthorOfSelected;
       if (!isAuthor) {
         setSession({ selectedPostId: '', isAuthorOfSelected: false });
@@ -58,7 +56,7 @@ export default function WritersRoom() {
     }
   }, [activeSubspace, selectedPostId, session?.userId, session?.isAuthorOfSelected, refresh]);
 
-  // ── Mobile: auto-switch to content on post select ───────────────────────────
+  // Mobile: auto-switch to content on post select
   useEffect(() => {
     if (selectedPostId) setMobileView('content');
   }, [selectedPostId]);
@@ -69,6 +67,7 @@ export default function WritersRoom() {
   const postSelected = showFeed && !!selectedPostId;
   const isMyJournal = activeSubspace === 'c2';
   const isMainJournal = activeSubspace === 'c1';
+  const isBoard = activeSubspace === 'c3';
 
   const handlePostSelect = (id: string) => {
     setSession({ selectedPostId: id, isAuthorOfSelected: isMyJournal });
@@ -93,7 +92,6 @@ export default function WritersRoom() {
     c3: 'Pin Board',
   };
 
-  // Single Board/Annotate action button (only for c1, not c2/c3)
   const actionBtn = isMainJournal ? (
     postSelected ? (
       <button
@@ -112,9 +110,6 @@ export default function WritersRoom() {
     )
   ) : null;
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // Render
-  // ──────────────────────────────────────────────────────────────────────────
   return (
     <div className="h-[100dvh] w-full flex flex-col bg-background text-foreground overflow-hidden">
       {/* Header */}
@@ -140,55 +135,63 @@ export default function WritersRoom() {
       </header>
 
       {/* ── DESKTOP layout ─────────────────────────────────────────────────── */}
-      <main className="flex-1 overflow-hidden hidden md:flex">
-        {/* Feed rail */}
-        {showFeed && (
-          <div
-            className={cn(
-              'shrink-0 border-r border-border/40 bg-sidebar flex flex-col overflow-hidden',
-              'transition-[width] duration-300 ease-in-out',
-              postSelected ? 'w-[200px]' : 'w-[280px]'
-            )}
-          >
-            <Feed onPostSelect={handlePostSelect} isMyJournal={isMyJournal} />
+      <main className="flex-1 overflow-hidden hidden md:flex relative">
+        {/* Board — full width, no panels */}
+        {isBoard && (
+          <div className="absolute inset-0">
+            <Pinboard />
           </div>
         )}
 
-        {/* Center */}
-        <div className="flex-1 min-w-0 bg-background flex flex-col relative overflow-hidden">
-          {showFeed && !postSelected && (
-            <EmptyCenter subspace={activeSubspace} />
-          )}
-          {isMainJournal && postSelected && (
-            <PostViewer
-              onBack={handleBack}
-              isAnnotating={annotationOpen}
-              onAnnotatingChange={setAnnotationOpen}
-            />
-          )}
-          {isMyJournal && postSelected && (
-            <PostEditor onBack={handleBack} />
-          )}
-          {activeSubspace === 'c3' && <Pinboard />}
-        </div>
+        {/* Feed + Content + ANB — two-panel system */}
+        {showFeed && (
+          <>
+            {/* Feed: full width when no post, hidden when post selected — slide transition */}
+            <div
+              className={cn(
+                'absolute inset-y-0 left-0 bg-sidebar border-r border-border/40 flex flex-col overflow-hidden',
+                'transition-all duration-300 ease-in-out z-10',
+                postSelected ? 'w-0 opacity-0 pointer-events-none' : 'w-full opacity-100'
+              )}
+            >
+              <Feed onPostSelect={handlePostSelect} isMyJournal={isMyJournal} />
+            </div>
 
-        {/* ANB panel — slides in when post is selected */}
-        <div
-          className={cn(
-            'shrink-0 border-l border-border/40 bg-sidebar flex flex-col overflow-hidden',
-            'transition-[width] duration-300 ease-in-out',
-            (postSelected || activeSubspace === 'c3') ? 'w-[240px]' : 'w-0'
-          )}
-        >
-          <ANBPanel />
-        </div>
+            {/* Content + ANB: hidden until post selected, slides in from right */}
+            <div
+              className={cn(
+                'absolute inset-y-0 right-0 flex',
+                'transition-all duration-300 ease-in-out',
+                postSelected ? 'left-0 opacity-100' : 'left-full opacity-0 pointer-events-none'
+              )}
+            >
+              <div className="flex-1 min-w-0 bg-background flex flex-col relative overflow-hidden">
+                {!postSelected && <EmptyCenter subspace={activeSubspace} />}
+                {isMainJournal && postSelected && (
+                  <PostViewer
+                    onBack={handleBack}
+                    isAnnotating={annotationOpen}
+                    onAnnotatingChange={setAnnotationOpen}
+                  />
+                )}
+                {isMyJournal && postSelected && (
+                  <PostEditor onBack={handleBack} />
+                )}
+              </div>
+
+              {/* ANB panel — fixed width, right side */}
+              <div className="w-[240px] shrink-0 border-l border-border/40 bg-sidebar flex flex-col overflow-hidden">
+                <ANBPanel />
+              </div>
+            </div>
+          </>
+        )}
       </main>
 
       {/* ── MOBILE layout ──────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col overflow-hidden md:hidden relative">
-        {/* Panel stack */}
         <div className="flex-1 relative overflow-hidden">
-          {/* Feed */}
+          {/* Feed / Board panel */}
           <div
             className={cn(
               'absolute inset-0 transition-transform duration-300 ease-in-out bg-sidebar',
@@ -196,10 +199,10 @@ export default function WritersRoom() {
             )}
           >
             {showFeed && <Feed onPostSelect={handlePostSelect} isMyJournal={isMyJournal} />}
-            {activeSubspace === 'c3' && <Pinboard />}
+            {isBoard && <Pinboard />}
           </div>
 
-          {/* Content */}
+          {/* Content panel */}
           <div
             className={cn(
               'absolute inset-0 transition-transform duration-300 ease-in-out bg-background',
@@ -217,22 +220,24 @@ export default function WritersRoom() {
             {isMyJournal && postSelected && <PostEditor onBack={handleBack} />}
           </div>
 
-          {/* ANB slide-up sheet */}
-          <div
-            className={cn(
-              'absolute inset-0 bg-sidebar transition-transform duration-300 ease-in-out z-10',
-              mobileView === 'anb' ? 'translate-y-0' : 'translate-y-full'
-            )}
-          >
-            <ANBPanel onClose={() => setMobileView(postSelected ? 'content' : 'feed')} />
-          </div>
+          {/* ANB slide-up sheet — only for journal views */}
+          {showFeed && (
+            <div
+              className={cn(
+                'absolute inset-0 bg-sidebar transition-transform duration-300 ease-in-out z-10',
+                mobileView === 'anb' ? 'translate-y-0' : 'translate-y-full'
+              )}
+            >
+              <ANBPanel onClose={() => setMobileView(postSelected ? 'content' : 'feed')} />
+            </div>
+          )}
         </div>
 
         {/* Mobile bottom nav */}
-        <nav className="h-14 bg-surface/95 backdrop-blur border-t border-border/40 flex items-center shrink-0 safe-area-bottom z-30">
+        <nav className="h-14 bg-surface/95 backdrop-blur border-t border-border/40 flex items-center shrink-0 z-30">
           <MobileTab
             icon={<Newspaper className="w-5 h-5" />}
-            label={activeSubspace === 'c3' ? 'Board' : 'Feed'}
+            label={isBoard ? 'Board' : 'Feed'}
             active={mobileView === 'feed'}
             onClick={() => setMobileView('feed')}
           />
@@ -241,21 +246,21 @@ export default function WritersRoom() {
             label="Read"
             active={mobileView === 'content'}
             disabled={!postSelected && showFeed}
-            onClick={() => postSelected || activeSubspace === 'c3' ? setMobileView('content') : undefined}
+            onClick={() => (postSelected || isBoard) ? setMobileView('content') : undefined}
           />
-          <MobileTab
-            icon={<span className="text-base leading-none">≡</span>}
-            label="Notes"
-            active={mobileView === 'anb'}
-            onClick={() => setMobileView('anb')}
-          />
+          {showFeed && (
+            <MobileTab
+              icon={<span className="text-base leading-none">≡</span>}
+              label="Notes"
+              active={mobileView === 'anb'}
+              onClick={() => setMobileView('anb')}
+            />
+          )}
         </nav>
       </div>
     </div>
   );
 }
-
-// ── Sub-components ─────────────────────────────────────────────────────────────
 
 function EmptyCenter({ subspace }: { subspace: string }) {
   return (

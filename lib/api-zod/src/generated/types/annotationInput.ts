@@ -15,4 +15,5 @@ export interface AnnotationInput {
   noteType?: string;
   strokes?: Stroke[];
   texts?: TextAnnotation[];
+  imageData?: string;
 }
