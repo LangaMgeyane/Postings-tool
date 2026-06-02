@@ -434,7 +434,7 @@ export function AnnotationOverlay({ post, onClose }: AnnotationOverlayProps) {
     if (file) loadImage(file);
   }, [loadImage]);
 
-  // ── Capture work area as data URL ─────────────────────────────────────────
+  // ── Capture work area as data URL (compressed + scaled for server) ─────────
   const captureWorkArea = useCallback((): string | null => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
@@ -447,13 +447,25 @@ export function AnnotationOverlay({ post, onClose }: AnnotationOverlayProps) {
       w: Math.round(WORK_AREA.w * cw * dpr),
       h: Math.round(WORK_AREA.h * ch * dpr),
     };
+
+    // Scale down if exceeds max dimension (1200px)
+    const MAX_DIM = 1200;
+    let finalW = wa.w;
+    let finalH = wa.h;
+    if (wa.w > MAX_DIM || wa.h > MAX_DIM) {
+      const scale = MAX_DIM / Math.max(wa.w, wa.h);
+      finalW = Math.round(wa.w * scale);
+      finalH = Math.round(wa.h * scale);
+    }
+
     const offscreen = document.createElement('canvas');
-    offscreen.width = wa.w;
-    offscreen.height = wa.h;
+    offscreen.width = finalW;
+    offscreen.height = finalH;
     const ctx = offscreen.getContext('2d');
     if (!ctx) return null;
-    ctx.drawImage(canvas, wa.x, wa.y, wa.w, wa.h, 0, 0, wa.w, wa.h);
-    return offscreen.toDataURL('image/png', 0.7);
+    ctx.drawImage(canvas, wa.x, wa.y, wa.w, wa.h, 0, 0, finalW, finalH);
+    // Export as JPEG at 0.7 quality for smaller file size
+    return offscreen.toDataURL('image/jpeg', 0.7);
   }, []);
 
   const handleApply = async () => {

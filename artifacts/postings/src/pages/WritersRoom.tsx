@@ -70,12 +70,15 @@ export default function WritersRoom() {
   const isBoard = activeSubspace === 'c3';
 
   const handlePostSelect = (id: string) => {
-    setSession({ selectedPostId: id, isAuthorOfSelected: isMyJournal });
+    // Set pageRole based on whether the current user is the author
+    // In My Journal (c2), user is always author. In Main Journal (c1), need to check post authorId
+    const pageRole = isMyJournal ? 'author' : 'member';
+    setSession({ selectedPostId: id, isAuthorOfSelected: isMyJournal, pageRole });
     refresh();
   };
 
   const handleBack = () => {
-    setSession({ selectedPostId: '', isAuthorOfSelected: false });
+    setSession({ selectedPostId: '', isAuthorOfSelected: false, pageRole: null });
     setAnnotationOpen(false);
     setMobileView('feed');
     refresh();

@@ -42,6 +42,7 @@ export interface Annotation {
   type: "drawing" | "text" | "note";
   text: string | null;
   noteType: string | null;
+  anchorText: string | null; // Selected text that the note is anchored to
   strokes: Stroke[];
   texts: TextAnnotation[];
   imageData: string | null;
@@ -536,6 +537,7 @@ export const store = {
       type: data.type || "note",
       text: data.text || null,
       noteType: data.noteType || null,
+      anchorText: data.anchorText || null,
       strokes: data.strokes || [],
       texts: data.texts || [],
       imageData: data.imageData || null,

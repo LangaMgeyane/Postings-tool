@@ -8,6 +8,7 @@ export interface SessionState {
   isAuthorOfSelected: boolean;
   sessionCode: string;
   isAdmin: boolean;
+  pageRole: 'author' | 'member' | null;
 }
 
 export function getSession(): SessionState | null {

@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useGetPost, usePublishPost, getGetPostQueryKey, getListPostsQueryKey } from '@workspace/api-client-react';
 import { getSession } from '@/session';
 import { StatusPill } from './StatusPill';
 import { Button } from '@/components/ui/button';
 import { formatDistanceToNow } from 'date-fns';
 import { AnnotationOverlay } from './AnnotationOverlay';
-import { NoteModal } from './NoteModal';
-import { MessageSquarePlus, ArrowLeft, BookOpen } from 'lucide-react';
+import { TextSelectionNote } from './TextSelectionNote';
+import { ArrowLeft, BookOpen } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
 

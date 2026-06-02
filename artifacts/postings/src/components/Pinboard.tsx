@@ -3,12 +3,13 @@ import React, {
 } from 'react';
 import { useGetPinboard, useSavePinboard, useListAnnotations, getListAnnotationsQueryKey } from '@workspace/api-client-react';
 import { PinCard, PinConnection } from '@workspace/api-client-react';
-import { getSession } from '@/session';
+import { getSession, setSession } from '@/session';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Maximize, Edit3, X, Loader2, Check, Filter, Link as LinkIcon } from 'lucide-react';
+import { Maximize, Edit3, X, Loader2, Check, Filter, Link as LinkIcon, ExternalLink } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { useLocation } from 'wouter';
 
 interface Transform { x: number; y: number; scale: number }
 
@@ -120,6 +121,7 @@ export function Pinboard() {
   const containerRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const session = getSession();
+  const [, setLocation] = useLocation();
 
   const [cards, setCards] = useState<PinCard[]>([]);
   const [connections, setConnections] = useState<PinConnection[]>([]);
@@ -140,6 +142,13 @@ export function Pinboard() {
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [expandNode, setExpandNode] = useState<ExpandNodeData | null>(null);
+
+  // Filter state
+  const [statusFilters, setStatusFilters] = useState<Set<string>>(new Set(['in-review', 'publish']));
+  const [typeFilters, setTypeFilters] = useState<Set<string>>(new Set(['post', 'annotationNode']));
+
+  // Snapshot for cancel edit mode
+  const editSnapshotRef = useRef<{ cards: PinCard[]; connections: PinConnection[] } | null>(null);
 
   // Selected connection index (for deletion)
   const [selectedConnIdx, setSelectedConnIdx] = useState<number | null>(null);
@@ -378,11 +387,17 @@ export function Pinboard() {
       const kx = cardX(card), ky = cardY(card);
       const isSelected = selectedIds.has(card.id);
       const isFocused = focusedId === card.id;
-      const dimmed = focusMode && !isFocused && !isSelected;
+      
+      // Apply filter logic: check if card matches active filters
+      const matchesType = typeFilters.has(card.type);
+      const matchesStatus = card.type === 'annotationNode' || statusFilters.has(card.status ?? '');
+      const filteredOut = !matchesType || !matchesStatus;
+      
+      const dimmed = (focusMode && !isFocused && !isSelected) || filteredOut;
       const isHovered = hoverCardId === card.id;
 
       ctx.save();
-      ctx.globalAlpha = dimmed ? 0.12 : 1;
+      ctx.globalAlpha = dimmed ? 0.2 : 1;
 
       if (card.type === 'post') {
         ctx.shadowColor = 'rgba(0,0,0,0.5)';
@@ -499,7 +514,7 @@ export function Pinboard() {
     }
 
     ctx.restore();
-  }, [cards, connections, groups, transform, selectedIds, focusedId, focusMode, editMode, renamingGroupId, hoverCardId, selectedConnIdx]);
+  }, [cards, connections, groups, transform, selectedIds, focusedId, focusMode, editMode, renamingGroupId, hoverCardId, selectedConnIdx, statusFilters, typeFilters]);
 
   // Canvas init + resize
   const initCanvas = useCallback(() => {
@@ -745,10 +760,34 @@ export function Pinboard() {
         toast({ title: 'Save failed', description: err.message, variant: 'destructive' });
       }
     }
+    // Capture snapshot when entering edit mode
+    if (!editMode) {
+      editSnapshotRef.current = {
+        cards: JSON.parse(JSON.stringify(cards)),
+        connections: JSON.parse(JSON.stringify(connections)),
+      };
+    } else {
+      editSnapshotRef.current = null;
+    }
     setSelectedIds(new Set());
     setHoverCardId(null);
     setSelectedConnIdx(null);
     setEditMode(prev => !prev);
+  };
+
+  const cancelEditMode = () => {
+    // Restore from snapshot
+    if (editSnapshotRef.current) {
+      setCards(editSnapshotRef.current.cards);
+      setConnections(editSnapshotRef.current.connections);
+      editSnapshotRef.current = null;
+    }
+    setBoardDirty(false);
+    setSelectedIds(new Set());
+    setHoverCardId(null);
+    setSelectedConnIdx(null);
+    setEditMode(false);
+    toast({ title: 'Changes discarded' });
   };
 
   // ── Group creation (no connections) ────────────────────────────────────────
@@ -775,6 +814,21 @@ export function Pinboard() {
 
   const focusedCard = focusedId ? cards.find(c => c.id === focusedId) : null;
 
+  // Open a post in the correct journal based on authorship
+  const handleOpenPost = (card: PinCard) => {
+    if (!card.postId || !session) return;
+    const isAuthor = card.authorName === session.userName;
+    const subspace = isAuthor ? 'c2' : 'c1'; // c2 = My Journal, c1 = Main Journal
+    const pageRole = isAuthor ? 'author' : 'member';
+    setSession({
+      selectedPostId: card.postId,
+      currentSubspace: subspace,
+      isAuthorOfSelected: isAuthor,
+      pageRole,
+    });
+    setLocation(`/writers-room?subspace=${subspace}`);
+  };
+
   if (isLoading) {
     return (
       <div className="h-full flex items-center justify-center">
@@ -794,10 +848,15 @@ export function Pinboard() {
           }
         </Button>
         {editMode && (
-          <div className="text-[9px] text-muted-foreground/40 italic flex items-center gap-1">
-            <LinkIcon className="w-3 h-3" />
-            <span>Drag from card edge to link</span>
-          </div>
+          <>
+            <Button variant="outline" size="sm" className="h-7 text-xs border-border/40" onClick={cancelEditMode}>
+              <X className="w-3.5 h-3.5 mr-1.5" />Cancel
+            </Button>
+            <div className="text-[9px] text-muted-foreground/40 italic flex items-center gap-1">
+              <LinkIcon className="w-3 h-3" />
+              <span>Drag from card edge to link</span>
+            </div>
+          </>
         )}
         {boardDirty && !editMode && (
           <span className="text-[9px] text-muted-foreground/50 italic">saving…</span>
@@ -834,7 +893,19 @@ export function Pinboard() {
               <div className="space-y-1">
                 {['in-review', 'publish'].map(s => (
                   <label key={s} className="flex items-center gap-2 cursor-pointer group">
-                    <input type="checkbox" defaultChecked className="accent-primary rounded" />
+                    <input
+                      type="checkbox"
+                      checked={statusFilters.has(s)}
+                      onChange={(e) => {
+                        setStatusFilters(prev => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.add(s);
+                          else next.delete(s);
+                          return next;
+                        });
+                      }}
+                      className="accent-primary rounded"
+                    />
                     <span className="text-xs text-foreground/70 capitalize group-hover:text-foreground transition-colors">
                       {s === 'in-review' ? 'In Review' : 'Published'}
                     </span>
@@ -848,7 +919,19 @@ export function Pinboard() {
               <div className="space-y-1">
                 {[['post', 'Post pins'], ['annotationNode', 'Annotation nodes']].map(([type, label]) => (
                   <label key={type} className="flex items-center gap-2 cursor-pointer group">
-                    <input type="checkbox" defaultChecked className="accent-primary rounded" />
+                    <input
+                      type="checkbox"
+                      checked={typeFilters.has(type)}
+                      onChange={(e) => {
+                        setTypeFilters(prev => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.add(type);
+                          else next.delete(type);
+                          return next;
+                        });
+                      }}
+                      className="accent-primary rounded"
+                    />
                     <span className="text-xs text-foreground/70 group-hover:text-foreground transition-colors">{label}</span>
                   </label>
                 ))}
@@ -907,6 +990,14 @@ export function Pinboard() {
             <p className="text-xs font-semibold truncate">{focusedCard.title}</p>
             {focusedCard.authorName && <p className="text-[10px] text-muted-foreground">{focusedCard.authorName}</p>}
           </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="h-7 text-xs shrink-0"
+            onClick={() => handleOpenPost(focusedCard)}
+          >
+            <ExternalLink className="w-3 h-3 mr-1.5" />Open
+          </Button>
           <Button variant={focusMode ? 'default' : 'secondary'} size="sm" className="h-7 text-xs shrink-0" onClick={() => setFocusMode(p => !p)}>
             {focusMode ? 'Exit Focus' : 'Focus'}
           </Button>
